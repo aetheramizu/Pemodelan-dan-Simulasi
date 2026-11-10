@@ -1,0 +1,1545 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sugarscape with Traders — Memahami Batch Runner</title>
+<style>
+:root{
+  --paper:#f4f1ea; --card:#fffdf8; --ink:#171b22; --muted:#626872; --line:#d9d5cc;
+  --teal:#0B6468; --teal-soft:#dff3ec; --sugar:#c98a00; --sugar-soft:#fbf0d2;
+  --spice:#b3204d; --spice-soft:#f9e0e8; --code-bg:#10141d; --code-ink:#e9edf2;
+  --serif:Georgia,"Times New Roman","Noto Serif","Liberation Serif",serif;
+  --sans:Inter,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --mono:"SFMono-Regular","Cascadia Code",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html{height:auto;scroll-behavior:smooth;scroll-padding-top:1.5rem}
+body{height:auto;min-height:100%;margin:0;display:block;overflow-x:hidden;overflow-y:auto;background:var(--paper);color:var(--ink);font-size:clamp(16px,1.05vw,19px);line-height:1.65;font-family:var(--sans)}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+
+/* progress bar */
+#pbar.progress{position:fixed;z-index:1000;top:0;left:0;right:0;height:3px;background:rgba(23,27,34,.12);border:0}
+#pfill{height:100%;width:0;background:#68cbb1;transition:width .12s linear}
+
+/* layout */
+.stage{position:static;display:block;min-height:0;overflow:visible}
+.slide{position:relative;inset:auto;display:block!important;overflow:visible;min-height:78svh;height:auto;padding:clamp(4.5rem,8.5vh,7.5rem) clamp(1.2rem,5.5vw,6.5rem);border-bottom:1px solid rgba(23,27,34,.08);scroll-margin-top:0}
+.slide .wrap{width:min(100%,1320px);max-width:1320px;margin:0 auto}
+.slide::before{content:counter(story,decimal-leading-zero) " / " attr(data-title);counter-increment:story;display:block;width:min(100%,1320px);margin:0 auto clamp(1.6rem,4vh,3rem);font:600 .72rem/1.2 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#66716f}
+body{counter-reset:story}
+
+/* section backgrounds */
+.slide:nth-child(2n){background:#fbf9f4}
+.slide:nth-child(3),.slide:nth-child(7),.slide:nth-child(11){background:#eae7df}
+
+/* dark section */
+.slide.dark-section, .slide.title-slide{
+  background:#111720!important; color:#f5f1e8!important; border-bottom-color:rgba(255,255,255,.1)!important;
+}
+.slide.dark-section::before, .slide.title-slide::before{ color:#8ddcc7!important; }
+.slide.dark-section .sec, .slide.title-slide .sec{ color:#8ddcc7!important; }
+.slide.dark-section h2, .slide.dark-section h3, .slide.title-slide h1{ color:#f5f1e8!important; }
+.slide.dark-section p, .slide.dark-section li, .slide.title-slide p, .slide.title-slide li{ color:#d5dbe0!important; }
+.slide.dark-section .card{ background:#1a222e!important; color:#f5f1e8!important; border-color:#343e4b!important; }
+.slide.dark-section .card p, .slide.dark-section .card li{ color:#d5dbe0!important; }
+.slide.dark-section .note{ background:#202c37!important; color:#e9f2ef!important; border-color:#72d6bc!important; }
+.slide.dark-section .note p{ color:#e9f2ef!important; }
+.slide.dark-section th{ background:#27313d!important; color:#f5f1e8!important; }
+.slide.dark-section td{ border-color:#343e4b!important; }
+.slide.dark-section canvas{ background:#fbfaf6; border:1px solid #d9d5cc; border-radius:3px; }
+.slide.dark-section .seg{ background:#1a222e!important; }
+.slide.dark-section .seg button{ color:#d9e0e4!important; }
+.slide.dark-section .seg button[aria-pressed="true"]{ background:#8ddcc7!important; color:#10201d!important; }
+.slide.dark-section .hint, .slide.title-slide .hint{ color:#b9c2c9!important; }
+
+.slide.dark-section p code, .slide.dark-section li code, .slide.dark-section td code,
+.slide.title-slide p code, .slide.title-slide li code{
+  background:#26313d; color:#a9f0dc; border:1px solid #3b4b58; border-radius:4px; padding:.08em .34em;
+}
+
+/* title slide */
+.slide.title-slide{
+  min-height:100svh; display:flex!important; flex-direction:column; justify-content:center;
+  padding-top:clamp(5rem,9vh,8rem); padding-bottom:clamp(4rem,7vh,6rem); border-bottom:0;
+}
+.slide.title-slide::before{ content:"SESSION 20  /  BATCH RUNNER"; letter-spacing:.2em; }
+.slide.title-slide .title-grid{
+  display:grid; grid-template-columns:minmax(0,1.1fr) minmax(280px,.9fr); gap:clamp(2rem,5vw,5rem); align-items:center;
+}
+.slide.title-slide .sec{ text-transform:uppercase; letter-spacing:.16em; font-size:.76rem; font-weight:700; }
+.slide.title-slide h1{
+  font-family:var(--serif); font-size:clamp(2.6rem,5.6vw,5.6rem); letter-spacing:-.045em; line-height:1.02; font-weight:500; margin:.4em 0 .3em;
+}
+.slide.title-slide p{ font-size:clamp(1.05rem,1.35vw,1.25rem); line-height:1.55; max-width:48ch; }
+.slide.title-slide .meta{ font-size:.82rem; color:#aeb8c0; max-width:55ch; margin-top:1.2rem; }
+#titleMap{ width:100%; height:auto; aspect-ratio:1/1; max-width:560px; border:1px solid rgba(255,255,255,.18); border-radius:50%; background:#171e29; padding:1.2rem; }
+
+/* typography */
+h1,h2,h3{ font-family:var(--serif); letter-spacing:-.035em; line-height:1.1; }
+h2{ font-size:clamp(2.2rem,4.4vw,4.4rem); font-weight:500; max-width:18ch; margin-bottom:.65em; }
+h3{ font-size:clamp(1.15rem,1.6vw,1.5rem); font-weight:600; letter-spacing:-.02em; }
+p{ max-width:75ch; line-height:1.7; }
+.sec{ font-size:.76rem; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:#167c69; margin-bottom:1rem; }
+.slide .wrap>p:first-of-type{ font-size:clamp(1.05rem,1.35vw,1.3rem); }
+.lede{ font-size:clamp(1.08rem,1.4vw,1.35rem); line-height:1.6; color:#2c3437; margin-bottom:1.4rem; }
+.slide.dark-section .lede{ color:#d9e2e6; }
+
+/* grids */
+.cols{ display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr); gap:clamp(1.5rem,3.5vw,3.5rem); align-items:start; }
+.cols.even{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+.cols.wide-left{ grid-template-columns:minmax(0,1.35fr) minmax(0,.65fr); }
+.cols.three{ grid-template-columns:repeat(3,minmax(0,1fr)); }
+
+/* cards & boxes */
+.card{ background:var(--card); padding:clamp(1.2rem,2vw,1.8rem); border-radius:3px; border:1px solid var(--line); }
+.card h3{ margin-top:0; }
+.note{ border-left:3px solid var(--teal); background:#eef6f5; padding:1rem 1.25rem; max-width:85ch; margin:1rem 0; }
+.note.warn{ border-color:#d7a847; background:#fbf0d2; color:#5c4400; }
+.tag{ display:inline-block; padding:.15em .5em; border-radius:2px; font-size:.76rem; font-weight:600; letter-spacing:.02em; }
+.tag.sugar{ background:var(--sugar-soft); color:#7a5400; }
+.tag.spice{ background:var(--spice-soft); color:#821437; }
+.tag.verified{ background:#dff3ec; color:#0e594d; }
+
+/* workflow diagram */
+.workflow-grid{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:1rem; margin:1.5rem 0;
+}
+.workflow-card{
+  background:var(--card); border:1px solid var(--line); border-radius:3px; padding:1.2rem; display:flex; flex-direction:column;
+}
+.workflow-card .step-num{
+  font-size:.72rem; font-weight:700; letter-spacing:.14em; color:#167c69; margin-bottom:.4rem; text-transform:uppercase;
+}
+.workflow-card h3{ margin:0 0 .4rem; font-size:1.1rem; }
+.workflow-card p{ font-size:.88rem; line-height:1.55; color:var(--muted); margin:0; }
+
+/* metrics grid */
+.metrics-grid{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1.2rem; margin:1.2rem 0;
+}
+.metric-card{
+  background:#1a222e; border:1px solid #343e4b; border-radius:3px; padding:1.4rem 1.2rem; text-align:center;
+}
+.metric-val{
+  font:500 clamp(2.4rem,4.2vw,3.8rem)/1 var(--serif); color:#8ddcc7; margin:.3rem 0;
+}
+.metric-lbl{
+  font-size:.76rem; letter-spacing:.12em; text-transform:uppercase; color:#aeb8c0; font-weight:700;
+}
+.metric-desc{
+  font-size:.84rem; color:#cbd5dc; margin-top:.5rem; line-height:1.45;
+}
+
+/* plot gallery */
+.plot-gallery{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:1.5rem; margin:1.5rem 0;
+}
+.plot-card{
+  background:var(--card); border:1px solid var(--line); border-radius:3px; padding:1rem;
+}
+.plot-card img{
+  width:100%; height:auto; border-radius:2px; border:1px solid rgba(0,0,0,.08); display:block;
+}
+.plot-caption{
+  font-size:.84rem; color:var(--muted); margin-top:.6rem; line-height:1.45;
+}
+
+/* big stat & insight */
+.big-stat{ font:500 clamp(2.6rem,5.5vw,5rem)/1 var(--serif); letter-spacing:-.06em; margin:1rem 0 .6rem; color:#16846d; }
+.big-stat span{ font-size:.6em; color:#8c958f; }
+.eyebrow{ font-size:.7rem; letter-spacing:.16em; font-weight:700; color:#737d78; text-transform:uppercase; }
+.insight-card{ min-height:260px; display:flex; flex-direction:column; justify-content:center; }
+.insight-card h3{ margin:.2rem 0 .5rem; }
+.result-note{ margin-top:1.5rem; padding:1.2rem 1.4rem; border-left:3px solid #16846d; background:#e4eee8; max-width:1050px; color:#171b22; }
+.result-note p{ margin:.4rem 0 0; color:#313a3c; }
+
+/* inline helpers */
+.hint{ font-size:.85rem; color:var(--muted); }
+.diagram{ width:100%; height:auto; display:block; }
+.svg-card{ background:var(--card); border:1px solid var(--line); border-radius:3px; padding:1rem; }
+.slide.dark-section .svg-card{ background:#141b24; border-color:#2a3644; }
+
+/* table */
+table{ width:100%; border-collapse:collapse; font-size:.88rem; margin:1rem 0; }
+th,td{ padding:.7rem .75rem; text-align:left; border-bottom:1px solid var(--line); }
+th{ font-weight:600; font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; background:#f0ece2; }
+td.num,th.num{ text-align:right; font-variant-numeric:tabular-nums; }
+
+/* codebox */
+.codebox{ margin-block:.5rem; min-width:0; max-width:100%; }
+.codebox pre{
+  background:var(--code-bg); color:var(--code-ink); padding:1rem; border-radius:3px; font-family:var(--mono); font-size:.84rem;
+  line-height:1.55; overflow-x:hidden!important; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal;
+  max-height:min(66vh,680px); scrollbar-width:thin;
+}
+.code-tabs{ display:flex; gap:.35rem; border-bottom:1px solid #343e4b; background:#18202c; padding:.3rem .5rem 0; }
+.code-tabs button{
+  background:none; border:none; color:#a3b0bc; padding:.45rem .85rem; font-size:.8rem; cursor:pointer; border-radius:3px 3px 0 0;
+}
+.code-tabs button[aria-selected="true"]{ background:var(--code-bg); color:#8ddcc7; font-weight:600; }
+.code-body{ display:grid; grid-template-columns:minmax(0,1.4fr) minmax(220px,.8fr); background:var(--code-bg); border-radius:0 0 3px 3px; }
+.code-notes{ background:#161d27; border-left:1px solid #283342; padding:.75rem; overflow-y:auto; max-height:min(66vh,680px); }
+.code-notes button{
+  display:block; width:100%; text-align:left; background:none; border:none; color:#b4c0cb; padding:.55rem .7rem; font-size:.8rem;
+  border-radius:2px; cursor:pointer; line-height:1.45; margin-bottom:.35rem; white-space:normal; overflow-wrap:anywhere;
+}
+.code-notes button:hover{ background:rgba(255,255,255,.05); }
+.code-notes button[aria-pressed="true"]{ background:#223140; color:#8ddcc7; font-weight:600; border-left:2px solid #8ddcc7; }
+.code-meta{ display:flex; justify-content:space-between; align-items:center; background:#131a24; padding:.4rem .8rem; font-size:.74rem; color:#8595a2; }
+.ln{ display:block; padding:.05rem 0 .05rem 2.8rem; position:relative; min-width:0; }
+.ln::before{ content:attr(data-n); position:absolute; left:.6rem; width:1.8rem; text-align:right; color:#506272; font-size:.78rem; user-select:none; }
+.ln.hl{ background:rgba(114,214,188,.15); color:#a9f0dc; }
+.ln.dim{ opacity:.45; }
+
+/* interactive widgets */
+.seg{ display:inline-flex; background:#e6e1d5; padding:2px; border-radius:3px; gap:2px; }
+.seg button{ border:none; background:none; padding:.35rem .75rem; font-size:.8rem; cursor:pointer; border-radius:2px; color:var(--ink); }
+.seg button[aria-pressed="true"]{ background:#fff; color:var(--teal); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+.range{ width:100%; margin:.6rem 0; accent-color:var(--teal); }
+.statline{ display:flex; gap:1.2rem; font-size:.86rem; color:var(--muted); margin-top:.4rem; flex-wrap:wrap; }
+.statline b{ color:var(--ink); }
+.slide.dark-section .statline b{ color:#f5f1e8; }
+
+/* roadmap phase buttons */
+.phases{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.4rem; margin:1rem 0; }
+.phase{
+  background:var(--card); border:1px solid var(--line); border-radius:3px; padding:.7rem; cursor:pointer; text-align:left;
+}
+.phase[aria-pressed="true"]{ border-color:var(--teal); background:var(--teal-soft); }
+.phase b{ display:block; font-size:.88rem; }
+.phase span{ font-size:.76rem; color:var(--muted); }
+.sess-list{ max-height:280px; overflow-y:auto; padding-right:.5rem; }
+.sess{ display:flex; align-items:baseline; gap:.6rem; padding:.35rem 0; border-bottom:1px solid rgba(0,0,0,.06); font-size:.84rem; }
+.sess .n{ font-weight:700; color:var(--teal); min-width:1.5rem; }
+.sess .d{ margin-left:auto; font-variant-numeric:tabular-nums; color:var(--muted); font-size:.78rem; }
+
+/* calc widget */
+.calc fieldset{ border:1px solid var(--line); border-radius:3px; padding:.8rem; margin-bottom:.7rem; display:grid; grid-template-columns:repeat(2,1fr); gap:.5rem; }
+.calc legend{ font-weight:700; font-size:.82rem; color:var(--teal); }
+.calc label{ font-size:.78rem; display:flex; flex-direction:column; gap:.2rem; color:var(--muted); }
+.calc input{ padding:.35rem; border:1px solid var(--line); border-radius:2px; font-size:.88rem; }
+.out{ font-size:.88rem; line-height:1.5; padding:.8rem; background:#f0ede4; border-radius:3px; margin-top:.5rem; }
+.out .ok{ color:#0B6468; font-weight:700; }
+.out .no{ color:#B3204D; font-weight:700; }
+
+/* responsive */
+@media (max-width:960px){
+  .cols, .cols.even, .cols.wide-left, .cols.three{ grid-template-columns:1fr; gap:1.8rem; }
+  .slide.title-slide .title-grid{ grid-template-columns:1fr; gap:1.8rem; }
+  .code-body{ grid-template-columns:1fr; }
+  .code-notes{ max-height:none; }
+  .phases{ grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:540px){
+  .slide{ padding:4rem 1rem; }
+  .slide.title-slide h1{ font-size:clamp(2.4rem,11vw,4rem); }
+  .phases{ grid-template-columns:1fr; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ transition:none!important; animation:none!important; }
+  html{ scroll-behavior:auto; }
+}
+
+/* Reading rhythm refinement: calmer hierarchy, less visual noise */
+body{font-size:clamp(16px,1.02vw,18px);line-height:1.72;letter-spacing:.002em}
+.slide{padding-top:clamp(4.2rem,7.2vh,6.4rem);padding-bottom:clamp(4.2rem,7.2vh,6.4rem)}
+.slide::before{font-size:.68rem;letter-spacing:.11em;text-transform:none;color:#727a78;margin-bottom:clamp(1.25rem,3vh,2.2rem)}
+h1,h2,h3{letter-spacing:-.025em}
+h2{max-width:23ch;line-height:1.08;margin-bottom:.55em}
+h3{line-height:1.2}
+p{max-width:70ch;line-height:1.75;margin-top:.55em;margin-bottom:.8em}
+li{line-height:1.65;margin:.25em 0}
+.sec{letter-spacing:.09em;font-size:.72rem;margin-bottom:.75rem}
+.lede{max-width:66ch;line-height:1.68}
+.workflow-card{padding:1.1rem 1.15rem}
+.workflow-card .step-num{letter-spacing:.07em;font-size:.68rem;text-transform:none}
+.workflow-card p{font-size:.9rem;line-height:1.62}
+.eyebrow{letter-spacing:.08em;font-size:.68rem;text-transform:none}
+.card{padding:clamp(1.1rem,1.8vw,1.6rem)}
+.code-notes button{font-size:.84rem;line-height:1.55;padding:.55rem .65rem}
+.codebox pre{font-size:.82rem;line-height:1.62}
+.slide.title-slide .title-grid{gap:clamp(1.5rem,4vw,4rem)}
+.slide.title-slide h1{letter-spacing:-.04em;line-height:1.03;max-width:11ch}
+.slide.title-slide p{line-height:1.65}
+.slide.title-slide .meta{line-height:1.55}
+.slide.title-slide::before{letter-spacing:.12em;text-transform:none}
+@media(max-width:960px){.slide{padding-top:4.5rem;padding-bottom:4.5rem}}
+@media(max-width:540px){.slide{padding:3.5rem 1rem} h2{font-size:clamp(2rem,9vw,3rem)}}
+
+
+/* Reading rhythm refinement: calmer hierarchy, less visual noise */
+body{font-size:clamp(16px,1.02vw,18px);line-height:1.72;letter-spacing:.002em}
+.slide{padding-top:clamp(4.2rem,7.2vh,6.4rem);padding-bottom:clamp(4.2rem,7.2vh,6.4rem)}
+.slide::before{font-size:.68rem;letter-spacing:.11em;text-transform:none;color:#727a78;margin-bottom:clamp(1.25rem,3vh,2.2rem)}
+h1,h2,h3{letter-spacing:-.025em}
+h2{max-width:23ch;line-height:1.08;margin-bottom:.55em}
+h3{line-height:1.2}
+p{max-width:70ch;line-height:1.75;margin-top:.55em;margin-bottom:.8em}
+li{line-height:1.65;margin:.25em 0}
+.sec{letter-spacing:.09em;font-size:.72rem;margin-bottom:.75rem}
+.lede{max-width:66ch;line-height:1.68}
+.workflow-card{padding:1.1rem 1.15rem}
+.workflow-card .step-num{letter-spacing:.07em;font-size:.68rem;text-transform:none}
+.workflow-card p{font-size:.9rem;line-height:1.62}
+.eyebrow{letter-spacing:.08em;font-size:.68rem;text-transform:none}
+.card{padding:clamp(1.1rem,1.8vw,1.6rem)}
+.code-notes button{font-size:.84rem;line-height:1.55;padding:.55rem .65rem}
+.codebox pre{font-size:.82rem;line-height:1.62}
+.slide.title-slide .title-grid{gap:clamp(1.5rem,4vw,4rem)}
+.slide.title-slide h1{letter-spacing:-.04em;line-height:1.03;max-width:11ch}
+.slide.title-slide p{line-height:1.65}
+.slide.title-slide .meta{line-height:1.55}
+.slide.title-slide::before{letter-spacing:.12em;text-transform:none}
+@media(max-width:960px){.slide{padding-top:4.5rem;padding-bottom:4.5rem}}
+@media(max-width:540px){.slide{padding:3.5rem 1rem} h2{font-size:clamp(2rem,9vw,3rem)}}
+
+</style>
+</head>
+<body>
+
+<div class="progress" role="progressbar" aria-label="Progress membaca presentasi" aria-valuemin="1" aria-valuemax="15" id="pbar"><i id="pfill"></i></div>
+
+<main class="stage" id="stage">
+
+<!-- ==========================================
+     PART A: INTRODUCTION & MODEL CONTEXT (~2 min)
+     ========================================== -->
+
+<!-- SECTION 01 -->
+<section class="slide title-slide" data-title="Judul">
+ <div class="wrap title-grid">
+  <div>
+   <div class="sec">Pemodelan dan Simulasi · Session 20</div>
+   <h1>Ketika Aturan Kecil Membentuk Pola Besar</h1>
+   <p>Memahami <em>Sugarscape with Traders</em> melalui Agent-Based Modeling dan eksperimen Batch Runner di Mesa.</p>
+   <p style="font-size:1.02rem;color:#b2c0cc;margin-top:.8rem">
+    Bagaimana keputusan sederhana setiap trader bisa membentuk pola pasar? Kita akan melihat cara kerja modelnya, lalu berfokus pada Session 20: bagaimana Batch Runner menguji kombinasi parameter, mengelola 442.905 baris data, dan membantu kita membaca jaringan perdagangan.
+   </p>
+   <p class="meta">Sumber Rujukan: Santa Fe Institute Complexity Explorer (Jackie Kazil &amp; Tom Pike, Project Mesa). Model Asli: Epstein &amp; Axtell, <i>Growing Artificial Societies</i> (1996).</p>
+   <p class="hint">Mulai dari cara kerja model, lalu ikuti eksperimen dan hasilnya.</p>
+  </div>
+  <canvas id="titleMap" class="title-map" role="img" aria-label="Peta sugar 50x50 dari sugar-map.txt: dua bukit sumber daya di kiri atas dan kanan bawah"></canvas>
+ </div>
+</section>
+
+<!-- SECTION 02 -->
+<section class="slide" data-title="Alur presentasi">
+ <div class="wrap">
+  <div class="sec">Peta pembahasan · sekitar 20 menit</div>
+  <h2>Dari model ke eksperimen</h2>
+  <p class="lede">Kita mulai dari konsep yang dibutuhkan untuk memahami model, lalu menghabiskan sebagian besar waktu untuk Batch Runner, data yang dihasilkan, dan cara menafsirkan hasilnya.</p>
+  
+  <div class="workflow-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+   <div class="workflow-card">
+    <div class="step-num">Bagian A · 2–3 menit</div>
+    <h3>Memahami ABM</h3>
+    <p>Gagasan dasar ABM dan bagaimana sesi sebelumnya membangun model yang akan kita uji.</p>
+   </div>
+   <div class="workflow-card">
+    <div class="step-num">Bagian B · sekitar 5 menit</div>
+    <h3>Melihat model bekerja</h3>
+    <p>Environment, perilaku trader, mekanisme barter, dan hasil dari satu simulasi awal.</p>
+   </div>
+   <div class="workflow-card" style="border-color:#167c69;background:#eef7f4;">
+    <div class="step-num" style="color:#0B6468;">Bagian C · sekitar 7 menit</div>
+    <h3 style="color:#0B6468;">Session 20: Batch Runner</h3>
+    <p>Menguji empat kombinasi parameter, memahami 442.905 baris hasil, lalu menyusun jaringan perdagangan dengan NetworkX.</p>
+   </div>
+   <div class="workflow-card" style="border-color:#167c69;background:#eef7f4;">
+    <div class="step-num" style="color:#0B6468;">Bagian D · sekitar 4 menit</div>
+    <h3 style="color:#0B6468;">Membaca hasil</h3>
+    <p>Membandingkan empat run dan membedakan pola yang terlihat dari kesimpulan yang belum bisa dibuat.</p>
+   </div>
+   <div class="workflow-card">
+    <div class="step-num">Bagian E · sekitar 1 menit</div>
+    <h3>Kesimpulan</h3>
+    <p>Bagaimana Batch Runner membantu kita menguji perilaku model secara lebih sistematis.</p>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 03 -->
+<section class="slide" data-title="Pondasi ABM & Peta Kursus">
+ <div class="wrap">
+  <div class="sec">Babak A: Pengantar</div>
+  <h2>Konsep dasar sebelum masuk ke Batch Runner</h2>
+  <div class="cols even">
+   <div class="card">
+    <h3>Melihat sistem dari bawah ke atas</h3>
+    <p>Dalam <b>Agent-Based Modeling (ABM)</b>, kita tidak langsung menentukan hasil akhir sebuah sistem. Kita menetapkan lingkungan, memberi setiap agent aturan perilaku, lalu mengamati pola yang muncul dari interaksi mereka. Pendekatan ini membantu kita mempelajari sistem yang tidak selalu bergerak menuju satu hasil yang sederhana.</p>
+    <p>Ada empat komponen yang perlu kita perhatikan:</p>
+    <ul>
+     <li><b>Environment</b>: grid 50×50 tempat sumber daya tumbuh kembali.</li>
+     <li><b>Autonomous agents</b>: trader dengan atribut seperti vision, metabolisme, dan cadangan awal yang bisa berbeda.</li>
+     <li><b>Behavioral rules</b>: aturan lokal untuk bergerak, mengonsumsi sumber daya, dan melakukan barter.</li>
+     <li><b>Measurement</b>: <code>DataCollector</code> dan <code>Batch Runner</code> untuk merekam serta membandingkan hasil simulasi.</li>
+    </ul>
+   </div>
+   <div class="card">
+    <h3>Bagaimana course ini sampai ke Session 20</h3>
+    <p class="hint" style="margin-top:0">Pilih fase untuk melihat konsep yang dibangun sebelum eksperimen batch.</p>
+    <div class="phases" id="phases" role="group" aria-label="Fase course"></div>
+    <div id="phaseInfo" style="margin-top:.8rem;font-size:.88rem"></div>
+    <div id="sessList" class="sess-list" aria-live="polite"></div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- ==========================================
+     PART B: THE INTEGRATED MODEL (~4 min)
+     ========================================== -->
+
+<!-- SECTION 04 -->
+<section class="slide dark-section" data-title="Arsitektur model akhir">
+ <div class="wrap">
+  <div class="sec">Babak B: Model Terintegrasi</div>
+  <h2>Arsitektur <code>SugarscapeG1mt</code></h2>
+  <div class="cols wide-left">
+   <div class="svg-card">
+    <svg class="diagram" viewBox="0 0 640 450" role="img" aria-label="Diagram arsitektur: SugarscapeG1mt mengelola schedule, grid, dan datacollector; agen Sugar, Spice, Trader ditempatkan di grid">
+     <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9z" fill="#8ddcc7"/></marker></defs>
+     <rect x="10" y="10" width="620" height="190" rx="10" fill="#182330" stroke="#0B6468" stroke-width="2"/>
+     <text x="28" y="38" font-size="17" font-weight="700" fill="#8ddcc7">SugarscapeG1mt (mesa.Model)</text>
+     <text x="28" y="58" font-size="12.5" fill="#aeb8c0">width=50, height=50, initial_population=200, vision, metabolism</text>
+     
+     <rect x="28" y="75" width="185" height="105" rx="6" fill="#222e3d" stroke="#3b4b5c"/>
+     <text x="40" y="98" font-size="14" font-weight="700" fill="#f5f1e8">self.schedule</text>
+     <text x="40" y="118" font-size="12" fill="#8ddcc7">RandomActivationByType</text>
+     <text x="40" y="138" font-size="11.5" fill="#d5dbe0">Sugar, Spice, Trader</text>
+     <text x="40" y="156" font-size="11" fill="#8595a2">Staggered activation</text>
+     
+     <rect x="228" y="75" width="185" height="105" rx="6" fill="#222e3d" stroke="#3b4b5c"/>
+     <text x="240" y="98" font-size="14" font-weight="700" fill="#f5f1e8">self.grid</text>
+     <text x="240" y="118" font-size="12" fill="#8ddcc7">MultiGrid(50, 50, torus=False)</text>
+     <text x="240" y="138" font-size="11.5" fill="#d5dbe0">Multi-agent per sel</text>
+     <text x="240" y="156" font-size="11" fill="#8595a2">get_neighborhood (Manhattan)</text>
+     
+     <rect x="428" y="75" width="185" height="105" rx="6" fill="#222e3d" stroke="#3b4b5c"/>
+     <text x="440" y="98" font-size="14" font-weight="700" fill="#f5f1e8">self.datacollector</text>
+     <text x="440" y="118" font-size="12" fill="#8ddcc7">DataCollector</text>
+     <text x="440" y="138" font-size="11.5" fill="#d5dbe0">model: Trader, Volume, Price</text>
+     <text x="440" y="156" font-size="11" fill="#8595a2">agent: Trade Network</text>
+     
+     <path d="M120 180 V245" stroke="#8ddcc7" stroke-width="2" marker-end="url(#ar)"/>
+     <path d="M320 180 V245" stroke="#8ddcc7" stroke-width="2" marker-end="url(#ar)"/>
+     <text x="130" y="218" font-size="12" fill="#8ddcc7">menjadwalkan</text>
+     <text x="330" y="218" font-size="12" fill="#8ddcc7">menempatkan</text>
+     
+     <rect x="10" y="250" width="195" height="95" rx="8" fill="#22201b" stroke="#C98A00" stroke-width="1.5"/>
+     <text x="24" y="275" font-size="14" font-weight="700" fill="#f0bc43">Sugar (mesa.Agent)</text>
+     <text x="24" y="295" font-size="11.5" fill="#d5dbe0">amount, max_sugar</text>
+     <text x="24" y="313" font-size="11.5" fill="#8ddcc7">step(): tumbuh +1 / step</text>
+     <text x="24" y="330" font-size="11" fill="#8595a2">Posisi tetap (lanskap)</text>
+
+     <rect x="220" y="250" width="195" height="95" rx="8" fill="#261a20" stroke="#B3204D" stroke-width="1.5"/>
+     <text x="234" y="275" font-size="14" font-weight="700" fill="#f07090">Spice (mesa.Agent)</text>
+     <text x="234" y="295" font-size="11.5" fill="#d5dbe0">amount, max_spice</text>
+     <text x="234" y="313" font-size="11.5" fill="#8ddcc7">step(): tumbuh +1 / step</text>
+     <text x="234" y="330" font-size="11" fill="#8595a2">Posisi tetap (rotasi 90°)</text>
+
+     <rect x="430" y="250" width="195" height="95" rx="8" fill="#18282b" stroke="#72d6bc" stroke-width="2"/>
+     <text x="444" y="275" font-size="14" font-weight="700" fill="#a9f0dc">Trader (mesa.Agent)</text>
+     <text x="444" y="295" font-size="11.5" fill="#d5dbe0">vision, metabolism, sugar, spice</text>
+     <text x="444" y="313" font-size="11.5" fill="#8ddcc7">move(), eat(), trade()</text>
+     <text x="444" y="330" font-size="11" fill="#f07090">maybe_die(): hapus jika lapar</text>
+    </svg>
+   </div>
+   <div>
+    <div class="codebox" data-code="modelInit"></div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 05 -->
+<section class="slide" data-title="Aturan trader: Move & Eat">
+ <div class="wrap">
+  <div class="sec">Babak B: Perilaku Agen</div>
+  <h2>Bagaimana trader bergerak dan bertahan hidup</h2>
+  <div class="cols">
+   <div class="codebox" data-code="move"></div>
+   <div>
+    <div class="card">
+     <h3>Tiga langkah dalam setiap step</h3>
+     <p>Setiap step, scheduler mengacak urutan trader. Setiap trader mengeksekusi 3 tahap utama:</p>
+     <ol style="padding-left:1.2rem;font-size:.9rem;line-height:1.6">
+      <li><b>Move (Pencarian Spasial Terbatas)</b>: Menginspeksi sel kosong dalam radius <code>vision</code> dengan metrik jarak Manhattan (<code>moore=False</code>). Mengevaluasi sel dengan jumlah gula dan rempah tertinggi. Bila seri, pilih yang terdekat; bila tetap seri, pilih acak.</li>
+      <li><b>Eat (Panen &amp; Konsumsi)</b>: Memanen seluruh gula dan rempah di sel tujuan, lalu membakar cadangan sebesar <code>metabolism_sugar</code> dan <code>metabolism_spice</code>.</li>
+      <li><b>Starvation (Kematian Selektif)</b>: Melalui fungsi <code>maybe_die()</code>, jika <code>sugar &le; 0</code> atau <code>spice &le; 0</code>, agen mati kelaparan dan dihapus permanen dari grid dan schedule.</li>
+     </ol>
+    </div>
+    <div class="codebox" data-code="eat" style="margin-top:.8rem"></div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 06 -->
+<section class="slide" data-title="Mekanisme perdagangan: MRS & Harga">
+ <div class="wrap">
+  <div class="sec">Babak B: Pertukaran Bilateral</div>
+  <h2>Kapan dua trader memilih untuk bertukar?</h2>
+  <div class="cols">
+   <div class="codebox" data-code="trade"></div>
+   <div>
+    <div class="card">
+     <h3>Coba aturan transaksinya</h3>
+     <p class="hint" style="margin-top:0">Kalkulator ini memperlihatkan bagaimana Marginal Rate of Substitution (MRS) memengaruhi harga dan keputusan barter.</p>
+     <div class="calc" id="calc"></div>
+     <div class="out" id="calcOut" aria-live="polite"></div>
+    </div>
+    <p class="note" style="margin-top:.8rem">
+     <b>Aturan Transaksi:</b> Trade hanya terjadi jika kesejahteraan (Cobb-Douglas welfare, <code>W = sugar^(m_s/(m_s+m_p)) * spice^(m_p/(m_s+m_p))</code>) kedua belah pihak meningkat, dan MRS setelah transaksi tidak saling menyilang (<i>no crossing condition</i>).
+    </p>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 07 -->
+<section class="slide" data-title="Pengukuran sistem: DataCollector">
+ <div class="wrap">
+  <div class="sec">Babak B: Instrumentasi</div>
+  <h2>Apa yang direkam oleh DataCollector?</h2>
+  <div class="cols">
+   <div class="codebox" data-code="collect"></div>
+   <div>
+    <div class="card">
+     <h3>Merekam tanpa mengubah perilaku model</h3>
+     <p>Mesa memisahkan dinamika model dari proses perekaman data menggunakan <code>mesa.DataCollector</code>:</p>
+     <ul>
+      <li><b>Model Reporters</b>:
+       <ul>
+        <li><code>"Trader"</code>: Menghitung jumlah agen hidup per step (<code>len(agents_by_type[Trader])</code>).</li>
+        <li><code>"Trade Volume"</code>: Total transaksi bilateral yang sukses disepakati pada step tersebut.</li>
+        <li><code>"Price"</code>: Geometric mean dari seluruh harga transaksi yang terjadi pada step tersebut.</li>
+       </ul>
+      </li>
+      <li><b>Agent Reporters</b>:
+       <ul>
+        <li><code>"Trade Network"</code>: Memanggil fungsi helper <code>get_trade(agent)</code> untuk mencatat daftar ID mitra dagang tiap trader.</li>
+       </ul>
+      </li>
+     </ul>
+    </div>
+    <p class="note warn" style="margin-top:.8rem">
+     <b>Catatan Kritis:</b> Pengumpulan data di level agent inilah yang menyebabkan ukuran data membengkak drastis saat masuk ke Batch Runner di Session 20.
+    </p>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 08 -->
+<section class="slide dark-section" data-title="Baseline single run (seed 42)">
+ <div class="wrap">
+  <div class="sec">Babak B Transisi ke C · Baseline Run</div>
+  <h2>Satu simulasi memberi kita satu cerita</h2>
+  <div class="cols even">
+   <div>
+    <div class="seg" id="layerSeg" role="group" aria-label="Layer peta">
+      <button aria-pressed="true" data-v="sugar">Sugar</button>
+      <button aria-pressed="false" data-v="spice">Spice</button>
+      <button aria-pressed="false" data-v="none">Tanpa layer</button>
+    </div>
+    <canvas id="replayMap" style="aspect-ratio:1;max-width:480px;margin-top:.6rem" role="img" aria-label="Posisi trader pada step terpilih"></canvas>
+    <label class="hint" for="frameRange">Geser slider untuk memilih step yang tersimpan (0 - 1000):</label>
+    <input type="range" class="range" id="frameRange" min="0" max="0" value="0">
+    <div class="statline" id="frameStat" aria-live="polite"></div>
+   </div>
+   <div>
+    <div class="seg" id="chartSeg" role="group" aria-label="Pilih grafik">
+      <button aria-pressed="true" data-v="trader">Jumlah trader</button>
+      <button aria-pressed="false" data-v="price">Price</button>
+      <button aria-pressed="false" data-v="volume">Trade Volume</button>
+    </div>
+    <canvas id="chart" style="height:260px;margin-top:.6rem" role="img" aria-label="Grafik hasil simulasi"></canvas>
+    <div id="runFacts" class="card" style="margin-top:.7rem;font-size:.92rem"></div>
+    <div class="result-note" style="margin-top:.8rem;background:#182633;border-color:#72d6bc;color:#e6edf2">
+     <strong style="color:#8ddcc7">Pertanyaan Ilmiah Kritis:</strong>
+     <p style="color:#cbd6de;margin-top:.3rem">
+      Pada run tunggal seed 42 ini, populasi menyusut dari 200 menjadi 64 trader dan stabil sejak step 312, dengan harga rata-rata 1,1068. Namun, apakah 64 penyintas ini hukum universal model, atau hanya kebetulan seed 42? <b>Inilah alasan mengapa kita membutuhkan Batch Runner di Session 20.</b>
+     </p>
+    </div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- ==========================================
+     PART C: SESSION 20 DEEP DIVE (~7 min)
+     ========================================== -->
+
+<!-- SECTION 09 -->
+<section class="slide" data-title="Session 20: Alur Batch Runner">
+ <div class="wrap">
+  <div class="sec">Session 20 · Alur eksperimen</div>
+  <h2>Alur eksperimen Batch Runner</h2>
+  <p class="lede">Di Session 20, kita beralih dari mengamati satu simulasi ke membandingkan beberapa konfigurasi. Batch Runner membantu kita melihat bagaimana hasil berubah ketika parameter model diubah.</p>
+
+  <div class="workflow-grid">
+   <div class="workflow-card">
+    <div class="step-num">Tahap 1</div>
+    <h3>Ruang Parameter</h3>
+    <p>Menentukan variabel yang diuji: <code>vision_min</code> (kapasitas penglihatan) dan <code>metabolism_max</code> (beban konsumsi).</p>
+   </div>
+   <div class="workflow-card">
+    <div class="step-num">Tahap 2</div>
+    <h3>Desain Sweep 2&times;2</h3>
+    <p>Memetakan kombinasi ortogonal: <code>range(1,3)</code> &times; <code>[3,5]</code> menghasilkan tepat 4 konfigurasi model terisolasi.</p>
+   </div>
+   <div class="workflow-card">
+    <div class="step-num">Tahap 3</div>
+    <h3>Eksekusi batch_run</h3>
+    <p>Mesa mengorkestrasi 4 simulasi otonom hingga step 1000 dengan pencatatan periodik (<code>data_collection_period=1</code>).</p>
+   </div>
+   <div class="workflow-card">
+    <div class="step-num">Tahap 4</div>
+    <h3>Olah Dataframe</h3>
+    <p>Mengelola ledakan data <b>442.905 baris</b> hasil agent reporter, melakukan agregasi dan filtering per <code>RunId</code>.</p>
+   </div>
+   <div class="workflow-card">
+    <div class="step-num">Tahap 5</div>
+    <h3>Analisis Jaringan</h3>
+    <p>Mengekstraksi relasi barter ke graf NetworkX, mengukur konektivitas, koefisien clustering, dan efisiensi global.</p>
+   </div>
+  </div>
+
+  <div class="note">
+   <b>Mengapa Alur Ini Sangat Krusial?</b> Dalam sistem non-linear berbasis agen, stokastisitas (pengacakan inisiasi agen, urutan aktivasi, dan pemilihan sel yang seimbang) membuat satu kali run rentan terhadap bias kebetulan. Batch sweep memetakan batas daya dukung (carrying capacity) dan sensitivitas parameter secara objektif.
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 10 -->
+<section class="slide" data-title="Session 20: batch_run & Parameter">
+ <div class="wrap">
+  <div class="sec">Session 20 · Kode eksperimen</div>
+  <h2>Menentukan parameter dan menjalankan eksperimen</h2>
+  <div class="cols">
+   <div class="codebox" data-code="batchRun"></div>
+   <div>
+    <div class="card">
+     <h3>Apa yang diuji dalam eksperimen ini?</h3>
+     <p>Tom Pike merancang parameter sweep dengan variabel spesifik:</p>
+     <ul>
+      <li><code>width: 50, height: 50</code> — Dimensi grid ruang spasial dijaga konstan agar densitas awal tetap setara (200 trader pada 2.500 sel).</li>
+      <li><code>vision_min: range(1, 3)</code> — Menguji nilai <b>1</b> dan <b>2</b>. Rentang vision tiap trader adalah <code>int(uniform(vision_min, vision_max+1))</code>, dengan <code>vision_max</code> tetap di default <b>5</b>. Jadi kelompok pertama bervision 1–5, kelompok kedua 2–5; yang diuji adalah batas bawahnya.</li>
+      <li><code>metabolism_max: [3, 5]</code> — Menguji nilai batas atas pembakaran energi <b>3</b> vs <b>5</b>. Menguji seberapa rentan populasi terhadap tekanan fisiologis ekstrem.</li>
+     </ul>
+     <h4 style="margin:1rem 0 .4rem;font-size:1.02rem">Argumen Pemanggilan <code>batch_run</code>:</h4>
+     <ul style="font-size:.88rem;color:var(--muted)">
+      <li><code>iterations = 1</code>: Satu kali run per kombinasi parameter (tahap eksplorasi awal).</li>
+      <li><code>number_processes = 1</code>: Eksekusi proses tunggal sekuensial (dapat diparalelkan pada CPU multi-core).</li>
+      <li><code>data_collection_period = 1</code>: Merekam data pada setiap step tanpa jeda waktu.</li>
+      <li><code>display_progress = True</code>: Menampilkan progres bar tqdm di Colab.</li>
+     </ul>
+    </div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 11 -->
+<section class="slide" data-title="Session 20: Skala Data 442.905 Baris">
+ <div class="wrap">
+  <div class="sec">Session 20 · Mengolah hasil</div>
+  <h2>Mengapa hasilnya mencapai 442.905 baris?</h2>
+  <div class="cols">
+   <div class="codebox" data-code="batchDf"></div>
+   <div>
+    <div class="card">
+     <h3>Memahami ukuran data</h3>
+     <p>Saat hasil <code>results_batch</code> diubah menjadi pandas DataFrame di Cell 26, ukurannya mencapai <b>442.905 baris &times; 12 kolom</b>. Mengapa untuk 4 run 1.000 step bisa sebesar itu?</p>
+     <div style="background:#f0ede4;padding:.8rem;border-radius:3px;margin:.6rem 0;font-size:.86rem">
+      <b>Perhitungan Skala Data:</b><br>
+      Jika hanya model reporters: 4 run &times; 1.001 step = <b>4.004 baris</b>.<br>
+      Namun karena ada <code>agent_reporters = {"Trade Network": get_trade}</code>, batch runner mencatat 1 baris untuk <b>setiap agen yang masih hidup pada setiap step</b>!<br>
+      Rata-rata ~110 agen hidup &times; 1.001 step &times; 4 run &asymp; <b>440.000+ baris</b>.
+     </div>
+     <p class="hint">
+      <b>Pelajaran Rekayasa Data dari Tom Pike:</b> Di Google Colab, agent reporter ini memakan memori RAM hingga mendekati limit crash. Tom Pike menjelaskan bahwa untuk eksperimen dengan iterasi banyak (misal 30 iterasi), agent reporter harus di-comment out agar Colab tidak kehabisan RAM.
+     </p>
+     <p style="font-size:.88rem">
+      Untuk analisis level model, data disaring: <code>results_df[results_df["metabolism_max"] == 3]</code> menghasilkan <b>306.267 baris</b> (menunjukkan populasi jauh lebih banyak bertahan pada metabolisme rendah!).
+     </p>
+    </div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 12 -->
+<section class="slide dark-section" data-title="Session 20: Analisis Trade Network">
+ <div class="wrap">
+  <div class="sec">Session 20 · Jaringan perdagangan</div>
+  <h2>Dari catatan transaksi menjadi jaringan perdagangan</h2>
+  <p class="lede">Pada Cell 31–34, catatan barter diubah menjadi graf NetworkX (<code>G = nx.Graph()</code>). Setiap trader menjadi simpul, dan hubungan perdagangan menjadi sisi yang menghubungkan mereka.</p>
+
+  <div class="metrics-grid">
+   <div class="metric-card">
+    <div class="metric-lbl">Node Connectivity</div>
+    <div class="metric-val">14</div>
+    <div class="metric-desc">Ketahanan struktural tinggi. Dibutuhkan penghapusan minimal 14 agen kunci secara bersamaan untuk memutus jaringan pasar.</div>
+   </div>
+   <div class="metric-card">
+    <div class="metric-lbl">Average Clustering</div>
+    <div class="metric-val">0,6826</div>
+    <div class="metric-desc">Kecenderungan pembentukan clique lokal sangat tinggi (~68% rekan dagang agen juga saling bertransaksi satu sama lain).</div>
+   </div>
+   <div class="metric-card">
+    <div class="metric-lbl">Global Efficiency</div>
+    <div class="metric-val">0,8045</div>
+    <div class="metric-desc">Global efficiency 0,8045. Nilai ini menggambarkan jarak jalur dalam graf agregat yang dianalisis.</div>
+   </div>
+  </div>
+
+  <div class="cols even" style="margin-top:1.5rem">
+   <div>
+    <div class="codebox" data-code="batchNetwork"></div>
+   </div>
+   <div>
+    <div class="card" style="background:#1a222e;border-color:#343e4b">
+     <h3 style="color:#f5f1e8">Melihat pola hubungan dalam jaringan</h3>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-top:.8rem">
+      <div>
+       <img src="assets/batch_degree_hist.png" alt="Histogram derajat jaringan perdagangan batch dari Session 20 notebook" style="width:100%;border-radius:2px;border:1px solid #3b4b5c">
+       <p class="hint" style="font-size:.78rem;margin-top:.4rem"><b>Histogram Derajat:</b> Derajat relasi agen berkisar antara 14 hingga 171 relasi, memuncak di interval 90–120.</p>
+      </div>
+      <div>
+       <img src="assets/batch_network_plot.png" alt="Visualisasi graf nx.draw dari Session 20 notebook" style="width:100%;border-radius:2px;border:1px solid #3b4b5c">
+       <p class="hint" style="font-size:.78rem;margin-top:.4rem"><b>Visualisasi nx.draw(G):</b> Memperlihatkan inti pasar terdesentralisasi yang sangat terhubung padat dan kohesif.</p>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div>
+  <p class="note warn" style="margin-top:1.4rem">
+   <b>Catatan Metodologis Penting:</b> Graf di atas dibangun dari <code>results_df</code> gabungan <b>seluruh RunId</b> tanpa memisahkan run. Karena <code>agent_id</code> dimulai ulang dari 0 pada setiap model, agen dari run yang berbeda bertabrakan pada ID yang sama. Artinya metrik 14 / 0,6826 / 0,8045 menggambarkan <b>graf agregat lintas-run</b>, bukan jaringan pasar satu run tunggal. Sebagai pembanding, graf satu run di Cell 21 menghasilkan Connectivity 0, Clustering 0,3969, dan Efficiency 0,4461 dengan keterangan <i>"Some traders not connected"</i>.
+  </p>
+ </div>
+</section>
+
+<!-- ==========================================
+     PART D: RESULTS & INTERPRETATION (~5 min)
+     ========================================== -->
+
+<!-- SECTION 13 -->
+<section class="slide" data-title="Hasil 4 kombinasi parameter">
+ <div class="wrap">
+  <div class="sec">Hasil eksperimen · Empat kombinasi</div>
+  <h2>Apa yang berubah pada empat kombinasi parameter?</h2>
+  <p class="lede">Tabel ini membandingkan hasil empat konfigurasi parameter pada Session 20. Angka-angka yang ditampilkan berasal dari hasil eksperimen yang tersedia.</p>
+
+  <div class="card" style="overflow-x:auto">
+   <table>
+    <thead>
+     <tr>
+      <th>RunId</th>
+      <th class="num">vision_min</th>
+      <th class="num">metabolism_max</th>
+      <th class="num">Trader (Step 1000)</th>
+      <th class="num">Survival Rate</th>
+      <th class="num">Price Rata-rata</th>
+      <th class="num">Total Trade Volume</th>
+     </tr>
+    </thead>
+    <tbody>
+     <tr>
+      <td><b>Run 0</b></td>
+      <td class="num">1</td>
+      <td class="num">3</td>
+      <td class="num"><b>145</b></td>
+      <td class="num">72,5%</td>
+      <td class="num">0,9612</td>
+      <td class="num">29.589</td>
+     </tr>
+     <tr>
+      <td><b>Run 1</b></td>
+      <td class="num">1</td>
+      <td class="num">5</td>
+      <td class="num"><b>64</b></td>
+      <td class="num">32,0%</td>
+      <td class="num">1,1070</td>
+      <td class="num">12.795</td>
+     </tr>
+     <tr>
+      <td><b>Run 2</b></td>
+      <td class="num">2</td>
+      <td class="num">3</td>
+      <td class="num"><b>155</b></td>
+      <td class="num">77,5%</td>
+      <td class="num">0,9762</td>
+      <td class="num">26.079</td>
+     </tr>
+     <tr>
+      <td><b>Run 3</b></td>
+      <td class="num">2</td>
+      <td class="num">5</td>
+      <td class="num"><b>71</b></td>
+      <td class="num">35,5%</td>
+      <td class="num">1,1288</td>
+      <td class="num">11.628</td>
+     </tr>
+    </tbody>
+   </table>
+  </div>
+
+  <div class="plot-gallery" style="margin-top:1.8rem">
+   <div class="plot-card">
+    <img src="assets/batch_traders_4runs_plot.png" alt="Grafik perbandingan populasi keempat run dari Session 20 Cell 30">
+    <div class="plot-caption">
+     <b>Trajektori Populasi 4 Run (Cell 30):</b> Dua garis teratas adalah kombinasi <code>metabolism_max = 3</code> (bertahan ~145–155 agen), sedangkan dua garis terbawah adalah <code>metabolism_max = 5</code> (hanya bertahan ~64–71 agen). Terjadi percabangan sistem yang sangat tegas.
+    </div>
+   </div>
+   <div class="plot-card">
+    <img src="assets/batch_price_all_scatter.png" alt="Scatter plot harga seluruh data batch dari Session 20 Cell 27">
+    <div class="plot-caption">
+     <b>Scatter Harga Seluruh Step (Cell 27):</b> Transaksi barter berosilasi di sekitar harga 1.0 (keseimbangan rasio gula:rempah pada lanskap simetris). Volatilitas tetap berlangsung dinamis sepanjang 1.000 step.
+    </div>
+   </div>
+   <div class="plot-card">
+    <img src="assets/batch_price_metab3_scatter.png" alt="Scatter plot harga subset metabolisme 3 dari Session 20 Cell 29">
+    <div class="plot-caption">
+     <b>Scatter Harga Subset Metabolisme 3 (Cell 29):</b> Kepadatan titik jauh lebih tinggi (306.267 titik data) karena jumlah agen yang bertahan hidup dan aktif berdagang lebih dari dua kali lipat.
+    </div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECTION 14 -->
+<section class="slide" data-title="Interpretasi ilmiah & evaluasi bukti">
+ <div class="wrap">
+  <div class="sec">Membaca hasil dengan hati-hati</div>
+  <h2>Apa yang bisa kita simpulkan dari hasil ini?</h2>
+  <p class="lede">Hasil simulasi memperlihatkan beberapa pola. Langkah berikutnya adalah menilai pola mana yang didukung data, dan mana yang masih perlu diuji.</p>
+
+  <div class="cols even">
+   <div class="card insight-card">
+    <div class="eyebrow">Temuan pertama</div>
+    <div class="big-stat">3 vs. 5 <span>metabolisme</span></div>
+    <h3>Metabolisme berkaitan kuat dengan jumlah trader yang bertahan</h3>
+    <p>Pada dua pasangan yang diuji, menaikkan <code>metabolism_max</code> dari 3 menjadi 5 berkaitan dengan penurunan jumlah trader akhir dari 145 menjadi 64, dan dari 155 menjadi 71. Pola ini terlihat jelas pada hasil yang tersedia, tetapi masih perlu diuji dengan lebih banyak replikasi.</p>
+   </div>
+
+   <div class="card insight-card">
+    <div class="eyebrow">Temuan kedua</div>
+    <div class="big-stat">+7 s.d. +10 <span>trader</span></div>
+    <h3>Perubahan vision memberi selisih lebih kecil</h3>
+    <p>Menaikkan <code>vision_min</code> dari 1 menjadi 2 menambah 10 trader pada kelompok <code>metabolism_max = 3</code>, dan 7 trader pada kelompok <code>metabolism_max = 5</code>. Pada eksperimen ini, selisihnya lebih kecil daripada perbedaan yang terlihat saat nilai metabolism berubah.</p>
+   </div>
+  </div>
+
+  <div class="cols even" style="margin-top:1.2rem">
+   <div class="card insight-card">
+    <div class="eyebrow">Temuan ketiga</div>
+    <div class="big-stat">2.3&times; <span>volume trade</span></div>
+    <h3>Lebih banyak trader, lebih banyak transaksi</h3>
+    <p>Total transaksi pada metabolisme rendah mencapai 26.000–29.500 trade, sedangkan pada metabolisme tinggi hanya 11.600–12.800 trade. Ini mencerminkan bahwa pasar terdesentralisasi tetap hidup sepanjang populasi pembeli dan penjual bertahan hidup.</p>
+   </div>
+
+   <div class="card insight-card">
+    <div class="eyebrow">Temuan keempat</div>
+    <div class="big-stat">&sigma; = 0,22 <span>akhir run</span></div>
+    <h3>Harga tetap berfluktuasi</h3>
+    <p>Rata-rata harga berada di sekitar 1,0, tetapi harga tetap berfluktuasi. Pada run seed 42, simpangan baku di step 801–1000 adalah 0,2209, sedikit lebih tinggi daripada 0,2060 pada step 1–100. Jadi, pada run ini variasi harga tidak mengecil di bagian akhir.</p>
+   </div>
+  </div>
+
+  <div class="result-note">
+   <strong style="font-size:1.02rem;color:#0e594d">Batasan Metodologis &amp; Integritas Akademik:</strong>
+   <p>
+    Eksperimen ini hanya menggunakan <b>1 iterasi per kombinasi parameter</b>. Hasilnya berguna untuk eksplorasi awal, tetapi <b>belum cukup untuk menyimpulkan hubungan sebab-akibat secara statistik</b>. Untuk analisis yang lebih kuat, setiap kombinasi perlu dijalankan berulang kali dengan seed berbeda, misalnya 30–50 iterasi, agar variasi hasil dan interval kepercayaan dapat diperkirakan.
+   </p>
+  </div>
+ </div>
+</section>
+
+<!-- ==========================================
+     PART E: CONCLUSION (~2 min)
+     ========================================== -->
+
+<!-- SECTION 15 -->
+<section class="slide dark-section" data-title="Kesimpulan">
+ <div class="wrap">
+  <div class="sec">Penutup</div>
+  <h2>Dari aturan sederhana ke eksperimen yang terukur</h2>
+  <div class="cols even">
+   <div class="card">
+    <h3 style="color:#f5f1e8">Apa yang kita pelajari dari model ini?</h3>
+    <ul>
+     <li><b>Pola makro muncul dari aturan lokal:</b> populasi, harga, dan jaringan perdagangan terbentuk dari interaksi agent, bukan dari satu pengendali pusat.</li>
+     <li><b>Lingkungan memengaruhi keputusan:</b> distribusi Sugar dan Spice yang berbeda memberi trader alasan untuk bergerak dan bertukar sumber daya.</li>
+     <li><b>Jaringan perlu dibaca sesuai cara pembentukannya:</b> metrik agregat yang dilaporkan adalah connectivity 14, clustering 0,68, dan efficiency 0,80. Karena graf menggabungkan semua RunId, angka ini bukan gambaran satu pasar tunggal.</li>
+    </ul>
+   </div>
+   <div class="card">
+    <h3 style="color:#f5f1e8">Mengapa Session 20 penting?</h3>
+    <ul>
+     <li><b>Batch Runner mendukung eksperimen:</b> beberapa konfigurasi dapat dijalankan dan dibandingkan dengan alur yang konsisten.</li>
+     <li><b>Parameter memberi pola yang layak diteliti:</b> pada empat run ini, metabolism berkaitan kuat dengan jumlah trader akhir, sementara perubahan vision menghasilkan selisih yang lebih kecil.</li>
+     <li><b>Peluang Riset Lanjutan</b>: Eksplorasi replikasi multi-seed secara paralel (<code>number_processes > 1</code>), pengujian penuaan agen (<i>aging</i> &amp; <i>replacement</i>), serta mekanisme warisan (<i>inheritance</i>).</li>
+    </ul>
+   </div>
+  </div>
+  <p class="note" style="margin-top:1.8rem">Notebook Session 20 dan model lokal <code>sugarscape_g1mt.py</code> menjadi rujukan untuk kode dan hasil yang dibahas di sini.
+  </p>
+ </div>
+</section>
+
+</main>
+
+<script>
+const DATA = {"sugar":[[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,2,2,2,2,2,2,2,2],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,3,4,4,4,4,3,3,3,3,3,3,3,2,2],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,2,2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,3,3,3,3,3,3,2],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,2],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,2,2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,3],[0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3],[0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3],[0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3],[0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3],[0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,3],[0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,2],[0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,3,3,3,3,3,3,2],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,4,4,4,4,3,3,3,3,3,3,3,2,2],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2],[1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2],[1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2],[1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2],[1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],[1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1],[1,1,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1],[1,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1],[1,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1],[2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1],[2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1],[2,2,2,2,2,2,3,3,3,3,3,3,3,4,4,4,4,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[2,2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,0,0,0],[2,2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,3,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0],[2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,3,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0],[2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0],[2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0],[2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0],[2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,2,2,2,2,2,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0],[2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,3,2,2,2,2,2,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0],[2,2,2,2,2,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0],[2,2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,3,3,3,3,3,3,2,2,2,2,2,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0],[2,2,2,2,2,2,3,3,3,3,3,3,3,4,4,4,4,3,3,3,3,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0],[2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0],[2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,1,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],"meta":{"seed":42,"steps":1000,"initial_traders":200,"final_traders":64,"stable_from":312,"vol_step1":781,"vol_late_mean":8.3,"price_mean":1.1068,"price_std_early":0.206,"price_std_late":0.2209},"frames":[{"step":0,"pos":[[40,7],[34,5],[35,12],[0,48],[21,6],[46,29],[39,23],[5,14],[22,13],[34,46],[14,43],[25,17],[31,25],[34,16],[8,32],[43,27],[35,0],[21,7],[32,48],[38,12],[0,38],[19,15],[4,48],[33,38],[19,25],[14,4],[40,3],[42,31],[30,26],[46,3],[6,15],[4,28],[0,5],[25,3],[18,27],[12,18],[3,37],[11,4],[15,37],[16,13],[29,20],[6,4],[15,23],[41,33],[8,16],[45,21],[3,5],[16,10],[44,9],[19,23],[15,42],[9,15],[47,21],[10,44],[29,22],[21,17],[34,21],[16,2],[32,7],[34,43],[42,21],[42,26],[24,43],[19,18],[43,13],[18,32],[19,14],[49,4],[25,15],[49,27],[7,29],[48,28],[10,47],[49,33],[21,20],[13,4],[24,49],[0,22],[47,34],[24,21],[39,34],[8,29],[24,17],[34,3],[48,1],[42,7],[38,47],[19,36],[44,40],[36,2],[26,31],[27,11],[30,29],[5,17],[1,31],[38,44],[26,31],[1,5],[35,33],[19,16],[44,11],[38,18],[45,34],[40,48],[11,3],[36,40],[15,7],[24,28],[3,39],[5,10],[30,18],[14,16],[34,14],[19,38],[44,25],[27,47],[36,37],[48,11],[40,31],[10,21],[2,29],[0,42],[31,40],[44,31],[35,0],[7,41],[30,30],[8,4],[0,18],[28,34],[12,44],[30,45],[9,31],[28,6],[9,4],[21,43],[34,2],[5,27],[19,1],[33,26],[39,43],[16,42],[28,22],[19,12],[18,44],[43,49],[18,49],[43,48],[41,2],[18,20],[33,32],[18,47],[14,43],[25,0],[24,40],[35,20],[19,41],[6,15],[34,26],[39,26],[15,23],[25,17],[41,40],[36,13],[21,49],[8,34],[15,37],[47,4],[39,2],[1,3],[28,4],[37,35],[27,6],[13,27],[6,20],[4,5],[35,3],[42,48],[6,36],[35,23],[49,39],[17,1],[9,36],[33,13],[36,38],[17,28],[7,22],[2,14],[8,48],[24,34],[47,2],[25,45],[39,29],[37,25],[10,4],[46,41],[48,48],[48,37],[40,20],[3,22]]},{"step":1,"pos":[[40,7],[34,9],[35,12],[2,45],[20,8],[42,28],[39,25],[6,14],[24,13],[34,45],[14,42],[25,17],[31,25],[34,18],[8,32],[42,27],[36,0],[21,8],[30,46],[38,12],[5,38],[19,15],[4,47],[33,38],[19,25],[14,4],[40,3],[41,29],[30,25],[46,3],[7,15],[4,25],[1,6],[24,3],[18,29],[12,16],[5,37],[15,5],[15,37],[18,15],[31,19],[6,4],[15,28],[40,33],[8,15],[42,22],[3,5],[16,10],[44,10],[19,23],[15,42],[9,15],[47,21],[10,44],[29,22],[20,17],[34,20],[16,2],[32,7],[34,43],[42,21],[41,23],[26,41],[19,18],[40,13],[18,32],[15,14],[49,4],[29,15],[48,27],[7,29],[48,28],[10,47],[49,33],[21,20],[14,7],[25,48],[0,22],[45,34],[24,20],[39,34],[8,29],[24,17],[31,4],[48,1],[42,7],[37,45],[19,36],[44,36],[36,4],[30,31],[27,12],[32,30],[5,17],[2,32],[38,44],[26,31],[2,5],[35,31],[19,16],[44,13],[38,19],[40,34],[40,48],[11,5],[35,40],[15,7],[25,28],[5,39],[5,10],[30,18],[14,15],[34,14],[16,38],[44,25],[28,43],[36,37],[48,14],[39,31],[14,21],[2,24],[1,42],[31,39],[44,31],[35,0],[7,41],[31,30],[9,5],[2,17],[29,34],[12,44],[30,44],[9,31],[28,6],[10,5],[21,41],[34,4],[5,27],[19,1],[33,25],[39,43],[16,42],[29,24],[19,12],[18,44],[42,49],[17,47],[43,48],[41,2],[18,20],[33,31],[18,46],[14,41],[25,1],[21,40],[35,24],[20,41],[8,14],[34,25],[39,24],[15,21],[25,18],[41,40],[36,13],[21,49],[8,34],[15,36],[47,4],[37,4],[2,4],[25,5],[37,35],[26,8],[14,28],[8,23],[6,7],[35,4],[42,48],[6,34],[34,24],[44,39],[17,2],[9,36],[33,13],[36,38],[17,29],[7,23],[2,14],[8,48],[24,34],[45,2],[24,45],[38,30],[37,25],[10,6],[43,41],[46,46],[45,36],[40,20],[4,24]]},{"step":2,"pos":[[40,8],[33,9],[35,13],[2,44],[20,9],[41,28],[39,26],[6,13],[24,12],[32,43],[14,40],[26,17],[32,25],[35,18],[8,31],[41,27],[36,1],[21,9],[30,43],[37,12],[5,33],[20,15],[5,47],[33,39],[18,25],[15,4],[39,3],[40,29],[30,24],[46,4],[9,16],[5,25],[1,7],[24,4],[18,30],[11,16],[6,37],[15,8],[15,38],[19,14],[32,19],[7,4],[16,28],[39,29],[9,14],[41,26],[4,5],[16,9],[43,10],[20,23],[15,40],[10,15],[46,21],[9,44],[28,22],[20,16],[35,20],[16,3],[32,6],[34,44],[41,21],[41,22],[26,40],[19,17],[40,14],[19,32],[14,14],[49,4],[29,14],[47,27],[6,29],[47,28],[9,47],[49,32],[21,21],[14,8],[26,48],[0,21],[44,34],[25,20],[39,33],[8,30],[24,18],[31,5],[48,1],[41,7],[36,45],[19,35],[40,36],[36,5],[30,32],[26,12],[32,31],[4,17],[3,32],[37,44],[27,31],[2,6],[34,31],[18,16],[45,13],[37,19],[40,35],[40,47],[11,6],[35,39],[15,9],[25,29],[5,40],[5,9],[31,18],[13,15],[34,13],[19,38],[45,25],[28,42],[35,37],[45,14],[39,32],[16,21],[5,24],[1,41],[32,39],[44,30],[34,0],[6,41],[31,31],[8,6],[3,17],[29,35],[12,43],[31,44],[9,32],[25,6],[9,6],[20,40],[33,4],[4,27],[20,1],[33,24],[40,43],[16,41],[29,25],[19,11],[17,44],[41,49],[17,46],[44,48],[41,1],[18,19],[33,30],[18,45],[15,41],[26,1],[21,39],[35,29],[20,39],[9,13],[35,25],[37,24],[15,20],[25,19],[41,41],[37,13],[21,48],[7,34],[14,36],[47,5],[37,5],[3,4],[24,5],[36,35],[26,9],[15,29],[8,28],[7,7],[35,5],[42,47],[6,33],[32,24],[43,36],[17,3],[10,36],[33,12],[37,38],[16,29],[7,24],[2,15],[7,48],[25,34],[45,3],[23,45],[37,30],[36,25],[10,7],[43,40],[45,46],[45,35],[39,20],[6,24]]},{"step":5,"pos":[[38,12],[32,11],[36,15],[8,43],[24,12],[37,26],[38,25],[5,11],[29,13],[35,40],[19,38],[25,15],[33,26],[34,18],[8,32],[41,28],[35,4],[19,9],[26,41],[35,11],[9,36],[24,14],[4,47],[36,37],[18,24],[14,6],[38,6],[39,29],[30,24],[45,4],[9,15],[6,25],[0,9],[23,4],[18,32],[11,12],[6,33],[21,9],[15,37],[21,13],[32,17],[6,2],[18,29],[34,31],[12,13],[36,25],[6,6],[18,8],[43,13],[20,22],[12,39],[12,16],[44,19],[15,43],[28,23],[20,15],[34,20],[16,6],[30,7],[35,42],[39,20],[37,24],[26,38],[19,17],[39,14],[20,32],[13,12],[46,5],[30,16],[46,25],[4,30],[41,27],[11,48],[49,31],[20,21],[13,10],[26,47],[1,21],[40,34],[27,25],[38,28],[11,30],[26,17],[29,6],[48,1],[42,7],[31,45],[20,35],[36,36],[36,8],[30,31],[26,12],[32,30],[5,19],[3,31],[36,42],[29,36],[3,8],[35,29],[18,19],[40,13],[37,19],[37,35],[38,44],[15,7],[33,38],[19,11],[26,27],[7,39],[8,9],[32,16],[14,15],[33,15],[19,35],[43,26],[30,37],[34,35],[43,15],[37,33],[16,21],[7,15],[3,42],[31,37],[42,29],[36,1],[7,41],[31,35],[8,10],[4,17],[29,34],[14,41],[31,39],[10,34],[24,13],[11,11],[24,37],[32,6],[5,27],[22,2],[32,24],[39,41],[18,40],[29,25],[21,12],[13,43],[40,43],[15,42],[44,47],[42,1],[19,19],[33,31],[20,41],[17,39],[27,1],[18,34],[35,25],[21,37],[12,12],[37,28],[38,22],[18,20],[25,20],[42,41],[38,13],[20,48],[7,37],[15,36],[47,6],[36,10],[4,4],[20,9],[38,34],[26,9],[15,29],[9,34],[6,7],[35,9],[42,48],[8,34],[32,25],[36,38],[18,3],[12,35],[34,10],[37,36],[18,30],[8,24],[1,13],[5,47],[24,36],[44,1],[23,44],[36,32],[33,24],[10,9],[43,36],[42,46],[42,35],[38,19],[8,28]]},{"step":10,"pos":[[39,12],[31,17],[38,18],[15,41],[25,11],[37,25],[37,27],[6,7],[31,18],[37,38],[25,36],[28,15],[31,25],[34,24],[11,34],[40,27],[15,8],[26,38],[36,15],[10,36],[24,19],[35,37],[18,23],[14,9],[36,10],[36,27],[27,24],[46,4],[10,13],[7,23],[2,8],[20,7],[19,31],[12,11],[11,32],[29,13],[20,39],[18,15],[31,19],[8,3],[17,29],[33,25],[19,12],[33,27],[9,6],[18,3],[43,14],[16,20],[11,36],[12,15],[42,16],[21,40],[27,23],[19,14],[33,17],[20,12],[27,7],[33,41],[39,21],[38,23],[29,31],[24,15],[38,14],[19,33],[13,11],[46,8],[29,15],[45,25],[2,32],[42,27],[12,46],[48,29],[19,19],[21,8],[38,33],[28,27],[36,19],[12,27],[28,20],[26,8],[48,1],[30,41],[20,34],[32,32],[34,9],[31,30],[25,14],[31,31],[4,18],[4,30],[35,39],[28,35],[0,8],[31,28],[18,16],[37,20],[38,22],[32,29],[32,43],[14,12],[34,36],[21,14],[27,29],[6,34],[8,15],[29,16],[13,15],[33,14],[21,33],[43,25],[31,36],[34,34],[39,17],[36,35],[14,21],[10,11],[5,33],[30,35],[39,29],[8,43],[32,33],[7,16],[13,14],[34,30],[12,38],[32,39],[12,37],[28,13],[21,11],[28,36],[30,5],[3,30],[23,4],[35,26],[39,36],[20,37],[30,25],[21,12],[14,41],[35,35],[13,38],[20,16],[38,30],[21,42],[21,37],[18,31],[35,24],[21,36],[9,14],[35,23],[35,20],[18,18],[27,21],[39,39],[35,18],[22,45],[7,36],[14,34],[48,8],[35,12],[5,2],[21,9],[39,24],[26,11],[18,29],[19,36],[13,9],[34,13],[40,49],[8,33],[34,25],[40,36],[17,3],[14,36],[32,12],[37,32],[16,30],[8,28],[2,13],[26,35],[41,1],[22,42],[34,32],[29,24],[14,10],[37,35],[42,42],[40,33],[34,21],[7,34]]},{"step":20,"pos":[[36,20],[32,17],[40,23],[21,36],[32,25],[35,26],[34,17],[39,28],[30,35],[25,22],[34,22],[33,20],[12,35],[41,27],[14,8],[26,39],[35,21],[24,18],[18,25],[16,7],[35,10],[30,24],[44,4],[9,14],[9,15],[8,8],[18,33],[11,11],[19,39],[32,19],[27,33],[24,15],[32,16],[3,6],[18,31],[37,29],[25,14],[31,26],[9,6],[16,9],[42,17],[32,31],[29,23],[19,13],[37,24],[28,13],[23,11],[32,38],[37,19],[32,18],[24,32],[26,14],[19,32],[19,10],[40,28],[16,20],[29,13],[35,31],[30,28],[40,22],[17,31],[27,19],[27,17],[48,1],[32,32],[21,39],[32,33],[37,12],[27,24],[25,17],[32,30],[7,17],[37,38],[25,33],[34,21],[18,15],[36,25],[40,21],[37,27],[25,38],[14,13],[24,12],[26,26],[14,15],[31,16],[24,34],[42,22],[31,34],[35,39],[40,13],[35,36],[17,18],[21,11],[9,35],[27,32],[38,24],[26,30],[20,13],[33,24],[12,39],[27,13],[20,16],[30,37],[5,32],[23,8],[29,21],[37,36],[32,22],[20,9],[15,41],[20,38],[21,16],[38,25],[25,36],[20,31],[32,24],[21,35],[13,13],[33,22],[31,21],[16,21],[32,27],[11,36],[10,35],[34,23],[15,9],[25,11],[41,21],[16,28],[28,35],[20,10],[32,12],[39,43],[34,30],[34,18],[20,6],[28,14],[40,35],[15,29],[11,28],[6,12],[35,34],[27,26],[39,21],[39,29],[29,22],[14,42]]},{"step":50,"pos":[[37,30],[20,13],[40,23],[20,34],[36,25],[34,26],[31,18],[28,25],[31,23],[34,19],[13,40],[39,21],[19,12],[13,10],[31,13],[27,30],[9,15],[11,13],[15,7],[16,28],[35,18],[31,31],[25,15],[30,24],[18,32],[34,29],[29,16],[29,34],[14,15],[17,8],[42,21],[29,27],[26,9],[33,12],[33,17],[21,33],[35,20],[13,15],[18,20],[31,16],[37,24],[35,19],[15,29],[29,21],[37,28],[29,33],[35,30],[33,28],[28,24],[18,18],[33,31],[38,29],[39,29],[24,13],[34,25],[13,11],[24,11],[15,36],[40,26],[35,34],[32,14],[21,11],[31,27],[32,19],[32,31],[11,28],[19,16],[32,24],[37,27],[15,20],[18,34],[29,35],[19,10],[32,28],[28,33],[20,41],[35,38],[27,22],[30,23],[14,39],[32,16],[32,18],[32,25],[35,23],[21,40],[33,29],[29,14],[25,20],[42,22],[36,38],[23,5],[26,13],[32,33],[19,32],[28,28],[28,31],[33,24],[28,20],[19,39]]},{"step":100,"pos":[[21,14],[14,34],[35,27],[37,29],[34,20],[29,33],[31,25],[39,20],[19,10],[26,15],[11,11],[11,14],[20,12],[19,31],[35,19],[36,18],[37,36],[16,28],[35,28],[29,24],[30,26],[12,15],[39,22],[31,29],[30,17],[32,23],[36,20],[16,10],[31,17],[35,25],[34,11],[27,21],[28,35],[32,33],[28,23],[26,18],[38,25],[30,27],[30,33],[25,11],[35,23],[15,7],[16,37],[28,20],[14,7],[29,22],[30,16],[10,37],[18,17],[34,19],[34,30],[18,19],[29,31],[14,13],[33,22],[16,40],[35,30],[33,26],[14,37],[33,21],[29,14],[27,25],[29,23],[29,28],[34,17],[36,31],[29,15],[37,26],[21,11],[25,14],[29,34],[20,37],[25,19],[35,24],[36,22],[15,36]]},{"step":200,"pos":[[19,10],[18,34],[29,35],[29,27],[33,13],[28,25],[34,22],[11,11],[33,10],[13,11],[14,13],[21,12],[15,28],[31,18],[37,24],[33,32],[20,35],[31,20],[20,17],[18,17],[35,22],[26,36],[38,19],[17,19],[29,16],[34,25],[29,13],[26,10],[32,30],[37,14],[26,23],[35,31],[26,15],[30,32],[32,25],[16,20],[20,33],[32,24],[11,15],[30,21],[20,15],[35,26],[36,36],[19,17],[29,17],[36,19],[19,37],[36,25],[11,38],[25,21],[29,33],[29,24],[25,32],[34,21],[35,30],[33,27],[37,30],[21,9],[32,21],[38,37],[21,36],[32,17],[33,22],[40,21],[14,39]]},{"step":500,"pos":[[20,10],[11,36],[32,25],[26,37],[38,12],[31,25],[31,19],[14,10],[29,30],[37,19],[11,16],[20,9],[14,38],[36,24],[33,20],[32,35],[19,31],[27,17],[19,16],[13,14],[32,11],[14,40],[35,19],[26,8],[29,14],[27,14],[29,15],[28,26],[27,35],[37,24],[30,18],[29,26],[37,26],[29,36],[29,24],[10,16],[13,35],[20,12],[13,9],[25,19],[18,17],[34,25],[35,29],[18,20],[30,31],[32,16],[16,39],[35,31],[36,20],[36,19],[37,25],[35,30],[28,16],[30,32],[28,9],[32,32],[27,19],[25,33],[40,35],[20,35],[30,29],[37,30],[27,12],[15,36]]},{"step":1000,"pos":[[31,33],[15,29],[31,30],[39,28],[36,19],[33,24],[32,24],[13,13],[36,37],[30,25],[16,10],[19,19],[8,35],[37,19],[33,20],[40,35],[20,34],[29,16],[33,28],[11,14],[26,9],[8,14],[38,13],[30,26],[30,18],[31,20],[34,16],[26,16],[37,30],[34,22],[30,15],[41,26],[26,21],[31,32],[29,33],[30,32],[11,37],[18,20],[32,31],[37,21],[34,23],[29,17],[39,31],[20,17],[34,29],[34,17],[19,38],[37,25],[38,15],[35,24],[26,14],[25,38],[32,18],[36,29],[25,10],[39,29],[25,27],[34,36],[38,36],[21,41],[24,36],[29,24],[24,14],[19,37]]}],"series":{"trader":[200,200,200,200,200,198,198,198,197,190,185,185,181,177,174,162,159,156,151,147,147,143,138,134,132,131,129,129,128,121,121,120,120,116,115,115,113,112,110,109,108,107,106,106,106,104,103,100,99,99,99,99,97,97,97,96,96,96,96,95,95,95,94,94,94,94,94,93,91,89,88,88,88,88,87,86,86,86,86,86,86,84,84,83,81,80,79,79,78,78,78,78,77,77,77,77,77,77,77,76,76,76,76,76,75,74,74,74,74,74,74,74,74,74,74,74,74,74,74,74,74,73,73,73,72,72,72,71,71,71,71,70,70,70,70,70,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,68,67,67,67,67,67,67,66,66,66,66,66,66,66,66,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64],"volume":[781,154,131,140,96,73,61,42,72,92,97,56,87,123,92,74,72,63,62,53,35,46,56,63,68,46,61,81,49,52,39,45,35,33,41,42,37,42,45,48,35,36,21,36,37,35,33,23,24,42,19,24,23,29,31,52,16,17,23,34,26,19,20,14,37,15,21,14,13,12,9,19,8,23,26,13,13,8,9,33,22,20,9,12,9,7,8,9,6,6,11,6,27,11,5,9,28,6,5,18,6,7,5,12,4,10,3,16,39,10,25,11,11,5,5,13,4,8,4,6,7,6,22,25,5,12,42,7,10,10,9,6,17,5,7,7,3,9,7,10,17,9,4,6,15,6,18,27,10,12,21,11,23,9,6,13,16,12,6,15,18,40,45,24,12,8,10,9,12,9,4,13,14,13,12,9,12,19,8,5,6,8,4,4,14,4,11,7,7,7,5,8,12,9,6,14,5,13,23,4,37,15,30,16,8,4,16,18,13,6,8,23,5,12,18,11,16,30,10,9,27,11,6,2,19,10,5,21,14,11,8,8,17,5,11,8,5,9,9,14,11,9,5,13,6,7,8,7,5,10,5,5,17,7,6,29,4,8,17,14,7,21,21,5,12,8,9,8,8,8,7,11,4,11,13,10,9,11,6,10,11,5,10,5,11,8,11,7,12,14,8,7,6,19,9,15,10,10,11,8,7,7,7,28,12,5,5,12,5,5,7,11,6,5,24,3,10,9,4,4,18,9,4,22,5,24,11,7,7,26,5,10,13,5,8,12,7,9,14,8,8,7,4,31,4,7,7,5,7,16,26,1,5,13,10,12,8,7,7,7,8,4,5,16,4,4,4,2,4,2,6,4,4,4,3,5,23,13,6,1,6,22,11,9,15,11,2,9,9,15,3,13,8,6,27,6,4,4,6,6,21,5,9,17,10,3,5,2,4,3,9,4,5,3,16,5,11,6,10,4,5,5,6,1,21,6,3,3,11,10,9,11,4,6,5,6,11,2,6,8,3,4,3,3,5,7,3,6,17,4,8,13,5,2,3,4,8,10,5,7,7,9,8,5,4,4,5,4,5,3,9,5,7,10,21,10,4,8,3,7,6,6,7,8,11,28,4,9,12,5,3,10,4,3,11,7,5,5,11,9,7,31,6,6,8,7,7,4,16,4,7,12,6,7,2,17,29,8,6,2,5,8,5,7,8,17,4,7,4,5,4,8,18,8,7,5,6,6,15,4,5,5,7,9,5,9,11,21,8,9,10,6,32,8,8,7,7,10,8,9,6,4,7,11,8,8,8,5,8,70,18,19,4,12,8,9,7,10,6,21,6,1,23,13,8,12,12,7,8,8,9,7,5,5,23,13,8,5,12,10,5,3,15,10,17,9,13,8,21,8,5,13,6,3,7,4,13,6,3,6,4,3,4,4,12,6,6,5,8,4,5,6,4,8,3,30,46,6,7,7,8,7,18,1,16,6,15,8,9,5,8,5,14,8,3,15,3,3,6,4,5,6,3,10,9,3,7,10,7,9,12,3,11,5,13,6,3,7,9,3,7,8,76,13,2,8,5,5,6,4,2,3,4,2,4,7,3,9,5,5,6,5,6,7,5,3,14,3,4,11,2,13,12,4,7,6,10,4,14,6,12,5,4,14,7,5,6,5,3,4,18,8,6,3,5,6,8,4,8,8,7,5,2,8,42,8,6,10,15,27,5,3,8,3,15,8,7,17,3,4,3,9,76,6,9,9,10,3,7,12,4,7,3,9,17,4,8,2,34,18,3,4,4,18,11,4,6,3,11,5,13,3,7,10,4,5,8,3,12,5,5,8,6,5,5,6,7,25,8,5,8,5,4,4,9,3,4,5,0,18,7,9,12,12,5,7,6,1,2,5,4,15,9,24,13,3,5,7,11,3,5,5,11,11,4,10,14,3,6,3,1,10,3,5,4,3,2,4,10,8,5,4,9,5,8,12,5,8,5,11,4,8,9,8,10,6,8,4,6,7,9,3,4,8,7,7,9,11,7,9,3,9,7,9,4,1,13,8,6,5,5,11,8,14,57,11,6,6,12,9,5,5,10,26,3,9,6,5,24,5,3,8,4,1,5,13,3,7,5,27,15,6,10,3,9,6,7,1,8,3,6,7,3,9,8,8,8,6,36,6,2,4,11,6,5,2,4,7,4,60,8,7,5,4,8,12,25,5,3,3,4,20,6,22,22,4,20,2,4,2,4,8,2,3,16,4,50,6,4,5,5,4,3,3,29,5,12,6,5,7],"price":[0.9723,1.0014,0.9789,0.9443,0.8704,0.8364,0.852,1.3127,0.7997,1.0456,0.7861,1.0443,0.9344,1.0246,0.9574,1.3682,1.0044,0.9849,1.3274,1.1284,1.2188,1.0039,1.0026,1.0546,1.0661,1.1336,1.0423,1.182,1.3012,1.4812,1.151,0.9078,1.3504,0.8633,1.0204,0.8619,1.0891,1.7322,1.1973,1.0115,1.0024,1.1833,0.9683,1.1671,0.8722,1.2433,1.153,1.0777,0.8838,1.0,1.1231,0.8203,1.1075,1.1679,1.2224,0.9858,1.4537,1.3118,1.3493,1.3625,1.1015,1.1633,1.3784,1.1705,1.1767,1.2945,1.3176,1.2013,1.1649,1.2161,1.2821,1.1857,0.9581,1.2433,1.6789,1.006,1.0874,1.2823,1.0909,1.3528,1.6482,0.9258,1.0901,1.27,1.0843,1.3545,1.2846,1.167,1.1127,0.9969,1.1246,0.9864,1.6808,1.0792,1.1636,1.0887,1.7859,0.8521,1.5046,1.0825,0.9116,1.0287,1.4056,1.2132,1.4005,1.2362,1.0458,1.2338,1.0225,1.3187,1.1389,1.1569,1.3509,1.0528,1.0212,1.1873,1.0949,1.2227,1.4157,0.9559,1.4337,1.0995,1.1323,1.4685,1.1647,1.0118,1.2105,1.0023,1.2011,0.9955,1.2113,1.0582,1.0951,1.0901,1.2462,1.0684,1.1042,1.0927,1.2649,1.3953,1.3799,1.2271,1.0921,1.0719,1.2304,0.9934,1.5267,0.8168,0.9994,0.9593,0.937,0.9701,1.0068,0.9406,0.951,0.9728,1.0644,1.1284,0.9508,1.6292,1.2869,1.7549,1.323,1.0981,0.998,1.0886,1.051,1.0718,0.8891,1.0398,0.8959,1.1943,0.9896,1.0337,1.4636,1.038,1.0017,1.4901,0.9971,0.9898,1.0775,0.9789,1.0493,1.0598,1.3354,0.9693,1.0547,1.1556,0.9918,1.0698,1.1423,0.883,0.8932,0.9742,0.8999,1.3239,0.9067,0.8969,1.2472,0.9155,1.1152,1.0805,0.9687,0.9979,0.9795,0.9898,1.0683,0.9197,0.9947,1.0803,0.9925,0.6597,0.9383,0.9825,1.0462,1.054,1.0172,1.049,1.1529,1.0656,1.0677,1.0102,1.1102,0.9742,1.5078,1.1796,1.6031,1.2993,1.2123,1.2761,1.1321,1.0628,0.9901,1.1778,1.0804,1.2237,1.2345,1.0154,0.997,0.985,1.2355,1.0436,1.0042,1.1365,0.8802,0.9979,1.0834,1.0644,1.3975,0.974,1.1369,1.0837,1.2977,1.1287,1.6961,1.3153,1.3223,1.2501,1.5512,1.1957,1.3267,1.364,1.3281,1.501,1.0914,1.2621,1.1036,1.1489,1.0791,1.0649,1.106,1.0997,0.9992,0.934,0.9824,1.0197,1.2222,1.1505,1.0712,1.1934,0.9891,1.0266,1.1261,0.9994,1.0871,0.9739,1.249,1.267,1.3903,0.9423,0.9524,1.0235,0.9841,1.0554,1.1072,1.6625,1.1116,0.978,0.9714,1.0761,0.999,1.0911,0.9913,0.8776,1.0437,1.0252,0.996,1.0633,1.0428,0.9038,1.1225,1.419,1.04,0.9406,1.1509,0.9607,0.998,0.9899,0.9422,0.9923,0.9609,1.0667,0.9964,1.081,1.1456,0.9827,1.0672,1.0813,1.0802,1.5451,1.2718,1.1055,1.1386,0.976,1.0918,1.3347,1.1816,1.0544,1.0392,1.3334,1.2353,1.234,1.1183,0.8968,0.912,0.9459,0.996,1.121,1.0449,1.0849,1.2196,0.8627,1.1186,1.1073,0.9995,1.131,0.99,1.0598,1.0944,1.0184,0.9834,1.1112,0.9981,0.9998,0.9978,1.0014,0.9986,1.0063,1.0059,1.0138,1.0135,1.0339,0.9896,1.1919,0.9869,0.9887,0.9452,1.4146,1.0435,1.0456,1.0224,1.1669,1.0434,1.1613,1.0212,0.9976,0.9961,1.0333,0.9959,0.9968,1.1313,1.0795,1.0438,1.0235,1.0226,1.0366,1.0643,1.0269,1.012,0.9962,1.0396,1.0317,1.0305,1.0336,1.0149,1.009,1.0025,1.0069,0.934,0.956,1.0541,1.1173,0.9373,1.0363,1.684,0.9957,1.001,1.004,1.0538,1.107,1.0875,1.0082,0.9676,1.0003,1.0606,1.0018,1.1646,1.1524,1.0549,0.9951,1.1497,1.0377,0.9659,1.0135,1.108,1.0541,1.08,1.0359,1.1629,0.9503,0.9989,1.0064,0.9458,1.0088,1.0188,1.1578,1.0712,1.1984,1.0479,1.0211,0.9992,1.0721,1.1234,1.0112,1.0307,1.0192,1.1673,1.1442,0.9936,1.0366,1.0076,0.8958,1.081,0.9853,1.0155,0.9548,1.0091,1.0182,0.9933,1.03,1.053,1.1395,1.0076,1.054,1.1532,1.1573,1.0053,1.0218,0.9949,1.0039,1.0065,1.1084,1.0104,1.0002,1.2699,1.1616,1.0925,1.0055,1.0474,1.1901,0.9524,1.0557,1.1766,0.9946,1.1455,1.1913,0.9961,1.2762,1.1382,1.0016,1.0283,1.1698,1.0266,1.0102,1.0195,1.1026,1.0078,1.1827,0.973,0.9856,1.1742,1.3511,1.02,1.0141,0.9823,1.4911,1.5206,1.2375,1.2663,1.2592,1.0792,1.1141,1.3476,1.1845,1.5251,1.1882,1.2363,1.1418,1.1572,1.0342,1.102,1.2084,1.4778,1.2013,1.1193,1.0574,1.0759,1.0965,1.054,1.2675,1.1011,1.288,1.2222,0.9724,1.1991,0.9842,1.0384,1.289,1.1998,1.1105,1.0191,1.0384,1.0286,0.9688,1.3748,1.062,1.0612,1.0144,0.9933,1.0099,1.1842,1.1573,1.0494,0.9959,1.1503,1.0732,1.0125,0.9937,1.2555,1.3406,0.954,1.0322,1.2081,0.9841,1.056,1.0301,1.2184,1.1274,1.0381,1.0447,0.9684,0.9919,1.816,1.2205,1.2203,1.4499,1.8669,1.034,1.0617,1.1165,0.9812,1.0337,1.0271,0.9752,1.043,1.1856,0.9874,0.9836,1.0279,1.0609,0.9943,0.9793,1.2547,1.0751,0.9801,1.124,1.0057,1.0557,1.3223,1.0313,1.2587,0.9998,0.9907,0.9967,0.9958,0.9894,1.1589,1.0159,1.3087,1.0314,1.037,1.2763,0.9971,0.9956,1.0888,1.0302,0.9878,1.1395,1.098,1.0053,1.0083,0.9914,1.087,1.0624,1.138,1.6512,1.0599,1.0339,1.112,1.133,1.1308,1.1103,1.0223,0.9996,0.9649,1.0343,0.9541,1.184,1.1241,0.9638,1.0194,0.9673,1.5281,1.0193,1.2559,1.3035,1.2408,1.0014,1.0066,1.0089,0.9438,1.0321,1.0366,1.0279,0.9976,1.0109,1.0651,1.4348,1.2614,1.0114,1.0678,1.0024,1.063,1.0229,1.5173,1.1864,1.1473,1.3003,1.0111,0.9935,1.0228,1.1236,1.9424,1.1588,1.0149,1.039,1.0769,0.9956,1.0167,1.1067,0.9309,1.1453,1.0248,1.0181,0.9934,1.0778,0.9931,1.0786,1.0513,1.0219,1.0507,0.9989,1.0479,1.007,1.0092,1.0732,1.1928,0.9956,1.0072,1.0439,1.0106,1.1158,1.091,1.049,1.005,1.1564,1.0112,1.0623,1.0492,0.9992,1.0115,0.9878,1.0311,1.0768,1.2702,1.0947,1.0958,0.9448,1.0379,1.1373,0.9882,1.2291,1.0562,0.9934,1.0089,1.0207,1.0116,1.0237,0.9846,0.9965,1.0096,1.0096,0.9929,0.9849,1.0238,1.0055,1.0056,1.0039,0.9922,1.423,1.0877,1.1428,1.0032,0.999,0.9815,0.957,1.0005,1.5189,0.9567,1.1088,0.9953,1.045,2.0219,1.1949,1.0455,1.3604,1.0628,1.1519,1.0553,1.039,1.2349,1.2695,1.1236,1.4687,1.4548,0.9954,0.9935,0.9852,0.9961,1.0353,1.0394,1.0018,0.9931,1.4567,1.2618,0.9756,1.0602,0.9981,1.5057,1.1385,1.1009,0.9851,1.0104,1.0032,0.9957,0.9934,1.0045,0.9793,1.0434,0.9893,0.9911,1.0442,0.9852,0.9911,1.0869,1.066,0.9829,1.2598,1.0016,0.9975,1.0311,1.0875,0.9854,1.0037,1.0322,1.0304,0.9859,1.0482,null,1.5908,1.0037,0.978,1.0752,1.0192,0.9841,0.9976,0.9999,1.0101,1.2711,0.9956,0.9834,1.9265,1.1768,1.4491,0.973,0.9981,0.9929,0.986,1.1931,0.992,0.9871,1.0718,1.2059,1.0957,1.407,1.1463,1.0309,1.0114,1.0056,1.0113,0.9987,1.11,0.9799,1.0167,1.183,1.1308,0.9638,1.1852,1.4039,1.2694,1.0047,0.9891,1.4783,1.3032,1.0802,1.1198,1.3024,0.996,0.981,1.1222,1.1604,1.0908,1.1619,1.0053,0.988,1.0094,0.9968,0.9981,1.1304,1.1116,1.1186,1.1738,0.9929,1.0537,0.9988,1.0022,1.0481,1.8266,1.2468,1.0903,1.2364,1.3588,1.1575,1.2268,1.006,1.6529,1.2304,1.0864,1.0851,1.3362,1.0278,1.1367,1.0552,1.0282,1.8846,1.0741,1.1179,1.1168,1.0646,0.9934,1.0701,1.0803,1.0108,1.1221,0.9989,1.3269,1.1239,0.9915,0.9928,1.144,0.9904,1.0623,1.002,0.9746,0.9871,1.0395,1.0137,1.0068,1.0054,1.4199,1.1133,1.152,1.1143,1.0015,1.0184,0.9987,1.0766,0.9728,1.0029,1.004,0.9975,0.9962,1.1827,0.9903,0.9921,0.9907,1.4457,1.0696,1.881,1.0437,0.9976,1.0027,1.2567,1.0426,1.0062,1.2022,0.9685,1.0006,0.9681,1.9202,1.3854,1.0572,0.9764,0.9707,0.988,1.2209,1.7054,1.0259,1.0033,0.9942,1.0351,1.6345,0.9538,1.0852,0.9786,1.0262,1.9808,1.0306,1.0186,2.097,1.2236,1.0049,0.9923,1.2144,1.3029,1.115,1.9037,1.0781,0.9994,1.0535,1.0075,1.0147,1.0025,1.3081,1.7842,0.9999,1.0652,1.3674,1.4554,1.2742]},"batch":[{"vision_min":1,"metabolism_max":3,"final_traders":145,"price_mean":0.9612,"total_volume":29589},{"vision_min":1,"metabolism_max":5,"final_traders":64,"price_mean":1.107,"total_volume":12795},{"vision_min":2,"metabolism_max":3,"final_traders":155,"price_mean":0.9762,"total_volume":26079},{"vision_min":2,"metabolism_max":5,"final_traders":71,"price_mean":1.1288,"total_volume":11628}]};
+
+/* ---------- code excerpts (logika verbatim dari Session 20, format dirapikan) ---------- */
+const CODE = {
+modelInit: [
+ {tab:"SugarscapeG1mt.__init__", src:"Session_20_Batch_Runner.ipynb", code:
+`class SugarscapeG1mt(mesa.Model):
+
+  def __init__(self, width=50, height=50, initial_population=200,
+               endowment_min=25, endowment_max=50, metabolism_min=1,
+               metabolism_max=5, vision_min=1, vision_max=5):
+
+    self.width = width
+    self.height = height
+    self.initial_population = initial_population
+    self.endowment_min = endowment_min
+    self.endowment_max = endowment_max
+    self.metabolism_min = metabolism_min
+    self.metabolism_max = metabolism_max
+    self.vision_min = vision_min
+    self.vision_max = vision_max
+
+    self.schedule = mesa.time.RandomActivationByType(self)
+    self.grid = mesa.space.MultiGrid(self.width, self.height, torus=False)
+    self.datacollector = mesa.DataCollector(
+        model_reporters = {"Trader": lambda m: m.schedule.get_type_count(Trader),
+         "Trade Volume": lambda m: sum(len(a.trade_partners)
+         for a in m.schedule.agents_by_type[Trader].values()),
+         "Price": lambda m: geometric_mean(flatten([a.prices for a in m.schedule.agents_by_type[Trader].values()]))},
+       agent_reporters = {"Trade Network": lambda a: get_trade(a)}
+    )`,
+  notes:[
+   {a:'class SugarscapeG1mt',b:'vision_max=5):',t:"Definisi kelas model dan default parameter yang akan di-sweep pada Batch Runner."},
+   {a:'self.schedule =',b:'torus=False)',t:"Inisialisasi scheduler acak per tipe agen dan grid 50x50 non-toroidal."},
+   {a:'self.datacollector =',b:'agent_reporters =',t:"DataCollector mengumpulkan variabel model (Trader, Volume, Price) dan agen (Trade Network)."}]}
+],
+landscape: [
+ {tab:"Agentize Landscape", src:"Session_20_Batch_Runner.ipynb", code:
+`    # read in sugar-map.txt
+    sugar_distribution = np.genfromtxt("sugar-map.txt")
+    spice_distribution = np.flip(sugar_distribution, 1)
+
+    agent_id = 0
+    for _, (x, y) in self.grid.coord_iter():
+      max_sugar = sugar_distribution[x, y]
+      if max_sugar > 0:
+        sugar = Sugar(agent_id, self, (x, y), max_sugar)
+        self.grid.place_agent(sugar, (x, y))
+        self.schedule.add(sugar)
+        agent_id += 1
+
+      max_spice = spice_distribution[x, y]
+      if max_spice > 0:
+        spice = Spice(agent_id, self, (x, y), max_spice)
+        self.grid.place_agent(spice, (x, y))
+        self.schedule.add(spice)
+        agent_id += 1`,
+  notes:[
+   {a:'sugar_distribution =',b:'np.flip(sugar_distribution, 1)',t:"Lanskap rempah dibentuk dengan membalik matriks gula secara horizontal (rotasi 90 derajat)."},
+   {a:'for _, (x, y)',b:'self.schedule.add(sugar)',t:"Setiap sel dengan sumber daya dijadikan agen Sugar dan dimasukkan ke grid dan schedule."},
+   {a:'max_spice =',b:'self.schedule.add(spice)',t:"Hal yang sama dilakukan untuk Spice, menciptakan dua kutub sumber daya yang asimetris."}]}
+],
+traders: [
+ {tab:"Initialize Traders", src:"Session_20_Batch_Runner.ipynb", code:
+`    for i in range(self.initial_population):
+      x = self.random.randrange(self.width)
+      y = self.random.randrange(self.height)
+      sugar = int(self.random.uniform(self.endowment_min, self.endowment_max+1))
+      spice = int(self.random.uniform(self.endowment_min, self.endowment_max+1))
+      metabolism_sugar = int(self.random.uniform(self.metabolism_min, self.metabolism_max+1))
+      metabolism_spice = int(self.random.uniform(self.metabolism_min, self.metabolism_max+1))
+      vision = int(self.random.uniform(self.vision_min, self.vision_max+1))
+
+      trader = Trader(agent_id, self, (x, y), moore=False,
+                      sugar=sugar, spice=spice,
+                      metabolism_sugar=metabolism_sugar,
+                      metabolism_spice=metabolism_spice,
+                      vision=vision)
+      self.grid.place_agent(trader, (x, y))
+      self.schedule.add(trader)
+      agent_id += 1`,
+  notes:[
+   {a:'x = self.random',b:'y = self.random',t:"Penempatan awal 200 trader secara acak di seluruh grid 50x50."},
+   {a:'sugar = int',b:'vision = int',t:"Atribut heterogenitas: cadangan gula/rempah, laju metabolisme, dan jarak pandang."},
+   {a:'trader = Trader',b:'agent_id += 1',t:"Instansiasi agen Trader dengan moore=False (tetangga von Neumann / Manhattan)."}]}
+],
+step: [
+ {tab:"SugarscapeG1mt.step()", src:"Session_20_Batch_Runner.ipynb", code:
+`  def step(self):
+    for sugar in self.schedule.agents_by_type[Sugar].values():
+      sugar.step()
+    for spice in self.schedule.agents_by_type[Spice].values():
+      spice.step()
+
+    trader_shuffle = list(self.schedule.agents_by_type[Trader].values())
+    self.random.shuffle(trader_shuffle)
+    for trader in trader_shuffle:
+      trader.prices = []
+      trader.trade_partners = []
+      trader.move()
+      trader.eat()
+      trader.maybe_die()
+
+    trader_shuffle = list(self.schedule.agents_by_type[Trader].values())
+    self.random.shuffle(trader_shuffle)
+    for trader in trader_shuffle:
+      trader.trade_with_neighbors()
+
+    self.schedule.steps += 1
+    self.datacollector.collect(self)`,
+  notes:[
+   {a:'for sugar in',b:'spice.step()',t:"Tahap 1: Seluruh sumber daya Sugar dan Spice tumbuh kembali sebesar +1 unit."},
+   {a:'trader_shuffle =',b:'trader.maybe_die()',t:"Tahap 2: Trader bergerak ke sel optimal, makan, dan mati jika kehabisan sumber daya."},
+   {a:'for trader in trader_shuffle:',b:'trader.trade_with_neighbors()',t:"Tahap 3: Trader yang masih hidup mencoba barter dengan tetangga dalam radius vision."},
+   {a:'self.schedule.steps += 1',b:'self.datacollector.collect(self)',t:"Tahap 4: Naikkan counter step dan lakukan pengumpulan data berkala."}]}
+],
+move: [
+ {tab:"Trader.move()", src:"Session_20_Batch_Runner.ipynb", code:
+`  def move(self):
+    neighbors = [i for i in self.model.grid.get_neighborhood(
+        self.pos, self.moore, False, radius=self.vision)
+        if self.is_occupied(i) == False]
+    neighbors.append(self.pos)
+
+    welfares = [self.calculate_welfare(
+        self.sugar + self.get_sugar_amount(pos),
+        self.spice + self.get_spice_amount(pos))
+        for pos in neighbors]
+
+    max_welfare = max(welfares)
+    candidate_indices = [i for i, w in enumerate(welfares) if w == max_welfare]
+    candidates = [neighbors[i] for i in candidate_indices]
+
+    distances = [get_distance(self.pos, pos) for pos in candidates]
+    min_dist = min(distances)
+    final_candidates = [candidates[i] for i, d in enumerate(distances) if d == min_dist]
+    self.random.shuffle(final_candidates)
+
+    self.model.grid.move_agent(self, final_candidates[0])`,
+  notes:[
+   {a:'neighbors = [i for i in',b:'neighbors.append(self.pos)',t:"Cari sel tak berpenghuni dalam radius vision (jarak Manhattan), termasuk sel sendiri."},
+   {a:'welfares = [',b:'max_welfare = max(welfares)',t:"Hitung potensi kesejahteraan Cobb-Douglas pada setiap sel kandidat."},
+   {a:'distances = [',b:'self.random.shuffle(final_candidates)',t:"Pilih sel dengan jarak terdekat dari kandidat terbaik; acak jika masih seri."},
+   {a:'self.model.grid.move_agent',b:'final_candidates[0])',t:"Pindahkan trader ke sel terbaik yang terpilih."}]}
+],
+eat: [
+ {tab:"eat() & maybe_die()", src:"Session_20_Batch_Runner.ipynb", code:
+`  def eat(self):
+    sugar_patch = self.get_sugar(self.pos)
+    if sugar_patch:
+      self.sugar += sugar_patch.amount
+      sugar_patch.amount = 0
+    self.sugar -= self.metabolism_sugar
+
+    spice_patch = self.get_spice(self.pos)
+    if spice_patch:
+      self.spice += spice_patch.amount
+      spice_patch.amount = 0
+    self.spice -= self.metabolism_spice
+
+  def maybe_die(self):
+    if self.is_starved():
+      self.model.grid.remove_agent(self)
+      self.model.schedule.remove(self)`,
+  notes:[
+   {a:'sugar_patch = self.get_sugar',b:'self.sugar -= self.metabolism_sugar',t:"Panen seluruh gula di sel, lalu bayar biaya metabolisme gula."},
+   {a:'spice_patch = self.get_spice',b:'self.spice -= self.metabolism_spice',t:"Panen seluruh rempah di sel, lalu bayar biaya metabolisme rempah."},
+   {a:'def maybe_die',b:'self.model.schedule.remove(self)',t:"Jika gula <= 0 atau rempah <= 0, agen dihapus dari simulasi (mati kelaparan)."}]}
+],
+trade: [
+ {tab:"Trader.trade()", src:"Session_20_Batch_Runner.ipynb", code:
+`  def trade(self, other):
+    mrs_self = self.calculate_MRS()
+    mrs_other = other.calculate_MRS()
+
+    if math.isclose(mrs_self, mrs_other, rel_tol=1e-02):
+      return
+
+    price = math.sqrt(mrs_self * mrs_other)
+
+    if mrs_self > mrs_other:
+      sold = self.maybe_sell_spice(other, price,
+                                   self.calculate_welfare(self.sugar, self.spice),
+                                   other.calculate_welfare(other.sugar, other.spice))
+      return self.trade(other) if sold else None
+    else:
+      sold = other.maybe_sell_spice(self, price,
+                                    other.calculate_welfare(other.sugar, other.spice),
+                                    self.calculate_welfare(self.sugar, self.spice))
+      return self.trade(other) if sold else None`,
+  notes:[
+   {a:'mrs_self =',b:'rel_tol=1e-02):',t:"Hitung MRS masing-masing trader. Jika MRS hampir sama, tidak ada dasar pertukaran."},
+   {a:'price = math.sqrt',b:'mrs_other)',t:"Harga keseimbangan lokal ditentukan melalui geometric mean: sqrt(MRS_A * MRS_B)."},
+   {a:'if mrs_self > mrs_other:',b:'return self.trade(other)',t:"Pihak dengan MRS lebih tinggi menjual rempah. Trade diulang secara rekursif hingga optimal."}]}
+],
+collect: [
+ {tab:"DataCollector Reporters", src:"Session_20_Batch_Runner.ipynb", code:
+`def get_trade(agent):
+  if type(agent) == Trader:
+    return agent.trade_partners
+  else:
+    return None
+
+def geometric_mean(list_of_prices):
+  return np.exp(np.log(list_of_prices).mean())
+
+# Di SugarscapeG1mt.step():
+agent_trades = self.datacollector._agent_records[self.schedule.steps]
+self.datacollector._agent_records[self.schedule.steps] = [
+    record for record in agent_trades if record[2] is not None
+]`,
+  notes:[
+   {a:'def get_trade',b:'return None',t:"Reporter agen: mengembalikan daftar ID mitra dagang untuk setiap Trader."},
+   {a:'def geometric_mean',b:'list_of_prices).mean())',t:"Helper penghitung rata-rata geometrik dari seluruh transaksi per step."},
+   {a:'agent_trades =',b:'record[2] is not None',t:"Membersihkan rekaman None dari agen pasif Sugar/Spice agar memori tidak bocor."}]}
+],
+batchRun: [
+ {tab:"batch_run()", src:"Session_20_Batch_Runner.ipynb", code:
+`params = {
+    "width": 50,
+    "height": 50,
+    "vision_min": range(1, 3),
+    "metabolism_max": [3, 5]
+}
+
+results_batch = mesa.batch_run(
+    SugarscapeG1mt,
+    parameters = params,
+    iterations = 1,
+    number_processes = 1,
+    data_collection_period = 1,
+    display_progress = True
+)`,
+  notes:[
+   {a:'params = {',b:'"metabolism_max": [3, 5]',t:"Dictionary parameter: grid 50x50 tetap, vision_min bernilai 1 atau 2, metabolism_max bernilai 3 atau 5 (total 2x2 = 4 kombinasi)."},
+   {a:'results_batch = mesa.batch_run(',b:'display_progress = True',t:"batch_run menjalankan simulasi untuk setiap kombinasi dan mengembalikan list record data."},
+   {a:'iterations = 1',b:'iterations = 1',t:"Satu kali perulangan per kombinasi parameter pada tahap eksplorasi awal."},
+   {a:'data_collection_period = 1',b:'data_collection_period = 1',t:"Mencatat data pada setiap step waktu (resolusi penuh 0 - 1000)."}]}
+],
+batchDf: [
+ {tab:"DataFrame & Filter", src:"Session_20_Batch_Runner.ipynb", code:
+`import pandas as pd
+
+results_df = pd.DataFrame(results_batch)
+# Hasil: 442.905 baris x 12 kolom!
+
+# Filter kombinasi dengan metabolisme maksimum rendah (306.267 baris)
+results_explore = results_df[results_df["metabolism_max"] == 3]
+
+# Plot perbandingan trajektori populasi keempat run
+for i in range(4):
+  results_explore = results_df[results_df["RunId"] == i]
+  plt.plot(results_explore["Step"], results_explore["Trader"])`,
+  notes:[
+   {a:'results_df = pd.DataFrame',b:'442.905 baris x 12 kolom!',t:"DataFrame membengkak ke 442.905 baris karena agent reporter mencatat setiap agen pada setiap step."},
+   {a:'results_explore = results_df[results_df["metabolism_max"] == 3]',b:'306.267 baris',t:"Filter metabolisme 3 menyisakan 306.267 baris (~69% data), membuktikan populasi jauh lebih padat."},
+   {a:'for i in range(4):',b:'plt.plot(results_explore["Step"]',t:"Visualisasi Cell 30: membandingkan kurva populasi hidup keempat run sepanjang 1.000 step."}]}
+],
+batchNetwork: [
+ {tab:"NetworkX Trade Graph", src:"Session_20_Batch_Runner.ipynb", code:
+`import networkx as nx
+
+G = nx.Graph()
+
+trade = results_df.dropna(subset=["Trade Network"])
+G.add_nodes_from(list(trade["AgentID"].unique()))
+
+for idx, row in trade.iterrows():
+  if len(row["Trade Network"]) > 0:
+    for agent in row["Trade Network"]:
+      G.add_edge(row["AgentID"], agent)
+
+print(f"Node Connectivity {nx.node_connectivity(G)}")
+print(f"Average Clustering {nx.average_clustering(G)}")
+print(f"Global Efficiency {nx.global_efficiency(G)}")`,
+  notes:[
+   {a:'G = nx.Graph()',b:'trade["AgentID"].unique()))',t:"Konstruksi graf: tambahkan semua agen yang pernah bertransaksi sebagai simpul (node)."},
+   {a:'for idx, row in trade.iterrows():',b:'G.add_edge(row["AgentID"], agent)',t:"Tambahkan sisi (edge) untuk setiap transaksi barter yang tercatat di daftar Trade Network."},
+   {a:'print(f"Node Connectivity',b:'nx.global_efficiency(G)}")',t:"Hasil empiris Session 20: Node Connectivity = 14, Clustering = 0.6826, Global Efficiency = 0.8045."}]}
+]
+};
+
+/* ---------- mount codeboxes ---------- */
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function mountCode(box){
+  const name = box.dataset.code, specs = CODE[name];
+  if(!specs) return;
+  box.innerHTML = `<div class="code-tabs" role="tablist"></div><div class="code-body"><pre><code></code></pre><div class="code-notes"></div></div><div class="code-meta"><span class="src"></span><span class="hint">klik catatan untuk menyorot kode</span></div>`;
+  let cur = 0;
+  const render = (idx) => {
+    cur = idx;
+    const s = specs[idx];
+    $$(".code-tabs button", box).forEach((b, i) => b.setAttribute("aria-selected", i === idx));
+    const lines = s.code.split("\n");
+    const codeEl = $("code", box);
+    codeEl.innerHTML = lines.map((l, i) => `<span class="ln" data-n="${i+1}">${esc(l) || " "}</span>`).join("");
+    const notesBox = $(".code-notes", box);
+    notesBox.innerHTML = s.notes.map((n, i) => `<button type="button" aria-pressed="false"><b>${i+1}.</b> ${n.t}</button>`).join("");
+    $$("button", notesBox).forEach((b, i) => b.addEventListener("click", () => select(i, true)));
+    s.notes.forEach(n => {
+      const a = lines.findIndex(l => l.includes(n.a));
+      let b = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].includes(n.b)) { b = i; break; }
+      }
+      n._r = (a >= 0 && b >= 0 && b >= a) ? [a, b] : null;
+    });
+    $(".src", box).textContent = "Sumber: " + s.src + " (Session 20)";
+    select(0, false);
+  };
+  const select = (k, scroll) => {
+    const s = specs[cur], lns = $$(".ln", box);
+    $$(".code-notes button", box).forEach((b, j) => b.setAttribute("aria-pressed", j === k));
+    lns.forEach(l => l.classList.remove("hl", "dim"));
+    const r = s.notes[k]._r;
+    if (!r) return;
+    lns.forEach((l, i) => {
+      if (i >= r[0] && i <= r[1]) l.classList.add("hl");
+      else l.classList.add("dim");
+    });
+    if (scroll) {
+      const pre = $("pre", box);
+      pre.scrollTo({
+        top: Math.max(0, lns[r[0]].offsetTop - pre.clientHeight / 3),
+        behavior: matchMedia("(prefers-reduced-motion:reduce)").matches ? "auto" : "smooth"
+      });
+    }
+  };
+  if (specs.length > 1) {
+    const tb = $(".code-tabs", box);
+    specs.forEach((s, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.textContent = s.tab;
+      b.addEventListener("click", () => render(i));
+      tb.appendChild(b);
+    });
+  }
+  box._select = select;
+  render(0);
+}
+function $(sel, root=document){ return root.querySelector(sel); }
+function $$(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+$$(".codebox").forEach(mountCode);
+
+/* ---------- canvas helpers ---------- */
+function fitCanvas(c, h){
+  const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  if (!r.width) return null;
+  const H = h || r.height;
+  c.width = Math.round(r.width * d);
+  c.height = Math.round(H * d);
+  const g = c.getContext("2d");
+  g.setTransform(d, 0, 0, d, 0, 0);
+  return { g, w: r.width, h: H };
+}
+
+const N = DATA ? DATA.sugar.length : 50;
+const sugarAt = (x, y) => DATA.sugar[x][y];
+const spiceAt = (x, y) => DATA.sugar[x][N - 1 - y];
+function colorMix(layer, x, y){
+  const s = sugarAt(x, y) / 4, p = spiceAt(x, y) / 4;
+  if (layer === "sugar") return `rgba(201,138,0,${0.06 + 0.9 * s})`;
+  if (layer === "spice") return `rgba(179,32,77,${0.06 + 0.9 * p})`;
+  return null;
+}
+function drawLand(c, layer, dots, dotR){
+  if (!c) return;
+  const f = fitCanvas(c, c.getBoundingClientRect().width);
+  if (!f) return;
+  const { g, w } = f;
+  const cs = w / N;
+  g.clearRect(0, 0, w, w);
+  g.fillStyle = "#fff";
+  g.fillRect(0, 0, w, w);
+  for (let x = 0; x < N; x++) {
+    for (let y = 0; y < N; y++) {
+      const px = x * cs, py = (N - 1 - y) * cs;
+      if (layer === "both") {
+        const s = sugarAt(x, y) / 4, p = spiceAt(x, y) / 4;
+        g.fillStyle = `rgba(201,138,0,${0.9 * s})`;
+        g.fillRect(px, py, cs + .5, cs + .5);
+        g.fillStyle = `rgba(179,32,77,${0.9 * p * (1 - 0.5 * s)})`;
+        g.fillRect(px, py, cs + .5, cs + .5);
+      } else if (layer !== "none") {
+        g.fillStyle = colorMix(layer, x, y);
+        g.fillRect(px, py, cs + .5, cs + .5);
+      }
+    }
+  }
+  if (dots) {
+    g.fillStyle = "#0B3C49";
+    g.strokeStyle = "#fff";
+    g.lineWidth = 1;
+    dots.forEach(([x, y]) => {
+      g.beginPath();
+      g.arc((x + .5) * cs, (N - 1 - y + .5) * cs, dotR || cs * .38, 0, 7);
+      g.fill();
+      g.stroke();
+    });
+  }
+  g.strokeStyle = "#9aa8b2";
+  g.lineWidth = 1;
+  g.strokeRect(.5, .5, w - 1, w - 1);
+}
+
+/* ---------- roadmap phases ---------- */
+const SESS = [
+  [1,"Introduction","1:36"],[2,"Sugarscape with Traders Overview","6:37"],
+  [3,"Start Google Colab & Initiate Classes","12:36"],[4,"Upload the Landscape","9:48"],
+  [5,"Agentize the Landscape Part I","10:41"],[6,"Agentize the Landscape Part II","13:13"],
+  [7,"Initialize Traders","25:33"],[8,"Sugar & Spice Step Functions","17:40"],
+  [9,"Traders Move Part I","7:40"],[10,"Traders Move Part II","13:13"],
+  [11,"Traders Move Part III","19:13"],[12,"Traders Move Part IV","18:34"],
+  [13,"Traders Eat","13:16"],[14,"Traders Trade Part I","14:11"],
+  [15,"Traders Trade Part II","12:54"],[16,"Traders Trade Part III","17:54"],
+  [17,"Traders Trade Part IV","14:33"],[18,"Data Collector (Model Level)","21:56"],
+  [19,"Data Collector (Agent Level)","17:14"],[20,"Batch Run","15:18"],
+  [21,"Conclusion","1:02"]
+];
+const PHASES = [
+  {n:"1. Pondasi & Lanskap", r:[1,6], d:"Pengantar Mesa, upload sugar-map.txt, dan agentisasi sel Sugar & Spice di grid 50x50."},
+  {n:"2. Populasi & Gerak", r:[7,13], d:"Inisialisasi Trader heterogen, heuristik pergerakan von Neumann, makan, dan kematian."},
+  {n:"3. Mekanisme Trade", r:[14,17], d:"Pertukaran bilateral berbasis MRS Cobb-Douglas dan harga geometric mean."},
+  {n:"4. Batch Runner", r:[18,20], d:"Instrumentasi DataCollector dan eksperimen komputasi Batch Runner — puncak course dan fokus presentasi ini."}
+];
+(function(){
+  const box = $("#phases"), info = $("#phaseInfo"), list = $("#sessList");
+  if (!box || !info || !list) return;
+  const show = (i) => {
+    $$("button", box).forEach((b, j) => b.setAttribute("aria-pressed", j === i));
+    const p = PHASES[i], items = SESS.filter(s => s[0] >= p.r[0] && s[0] <= p.r[1]);
+    info.innerHTML = `<b>${p.n} (Sesi ${p.r[0]}–${p.r[1]}):</b> ${p.d}`;
+    list.innerHTML = items.map(s => `<div class="sess"><span class="n">${s[0]}</span><span>${esc(s[1])}</span><span class="d">${s[2]}</span></div>`).join("");
+  };
+  PHASES.forEach((p, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "phase";
+    b.setAttribute("aria-pressed", "false");
+    b.innerHTML = `<b>${p.n}</b><span>Sesi ${p.r[0]}–${p.r[1]}</span>`;
+    b.addEventListener("click", () => show(i));
+    box.appendChild(b);
+  });
+  show(3); // default highlight Batch Runner phase
+})();
+
+/* ---------- trade calculator ---------- */
+(function(){
+  const host = $("#calc");
+  if (!host) return;
+  const mk = (id, t, v) => `<fieldset><legend>${t}</legend>${[["s","sugar",v[0]],["p","spice",v[1]],["ms","metabolism_sugar",v[2]],["mp","metabolism_spice",v[3]]].map(([k,l,val])=>`<label>${l}<input type="number" min="1" step="1" id="${id}${k}" value="${val}"></label>`).join("")}</fieldset>`;
+  host.innerHTML = mk("a","Trader A (self)",[20,60,2,2]) + mk("b","Trader B (other)",[50,10,2,2]);
+  const out = $("#calcOut");
+  const welfare = (o, s, p) => Math.pow(s, o.ms / (o.ms + o.mp)) * Math.pow(p, o.mp / (o.ms + o.mp));
+  const mrs = (o, s, p) => (p / o.mp) / (s / o.ms);
+  const close = (a, b) => Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
+  const f = (x, d=3) => Number(x).toFixed(d).replace(".", ",");
+  function maybeSell(sl, ot, price, wS, wO){
+    let sg, sp;
+    if (price >= 1) { sg = 1; sp = Math.trunc(price); }
+    else { sg = Math.trunc(1 / price); sp = 1; }
+    const ss = sl.s + sg, os = ot.s - sg, sp2 = sl.p - sp, op = ot.p + sp;
+    if (ss <= 0 || os <= 0 || sp2 <= 0 || op <= 0) return { ok: false, why: "salah satu pihak akan kehabisan sumber daya" };
+    const better = (wS < welfare(sl, ss, sp2)) && (wO < welfare(ot, os, op));
+    const notCross = mrs(sl, ss, sp2) > mrs(ot, os, op);
+    if (!(better && notCross)) return { ok: false, why: !better ? "welfare salah satu pihak tidak meningkat" : "MRS akan saling menyilang" };
+    sl.s += sg; ot.s -= sg; sl.p -= sp; ot.p += sp;
+    return { ok: true };
+  }
+  function run(){
+    const g = id => ({ s: +$("#"+id+"s").value, p: +$("#"+id+"p").value, ms: +$("#"+id+"ms").value, mp: +$("#"+id+"mp").value });
+    const A = g("a"), B = g("b");
+    if ([...Object.values(A), ...Object.values(B)].some(v => !(v >= 1) || !Number.isFinite(v))) {
+      out.innerHTML = `<span class="no">Isi semua kolom dengan angka bulat positif &ge; 1.</span>`;
+      return;
+    }
+    const A0 = {...A}, B0 = {...B};
+    const ma = mrs(A, A.s, A.p), mb = mrs(B, B.s, B.p);
+    let html = `MRS A = <b>${f(ma)}</b>, MRS B = <b>${f(mb)}</b>. `;
+    if (close(ma, mb)) {
+      out.innerHTML = html + `MRS hampir identik: <span class="no">tidak ada transaksi</span> (<code>math.isclose</code>).`;
+      return;
+    }
+    const price0 = Math.sqrt(ma * mb);
+    html += `Harga awal = &radic;(MRS A &times; MRS B) = <b>${f(price0)}</b>. Pihak ${ma > mb ? "A" : "B"} menjual rempah.<br>`;
+    let n = 0, why = "";
+    while (n < 2000) {
+      const cA = mrs(A, A.s, A.p), cB = mrs(B, B.s, B.p);
+      if (close(cA, cB)) { why = "MRS sudah mencapai ekuilibrium lokal"; break; }
+      const p = Math.sqrt(cA * cB);
+      const wA = welfare(A, A.s, A.p), wB = welfare(B, B.s, B.p);
+      const res = cA > cB ? maybeSell(A, B, p, wA, wB) : maybeSell(B, A, p, wB, wA);
+      if (!res.ok) { why = res.why; break; }
+      n++;
+    }
+    if (n === 0) html += `Hasil: <span class="no">Transaksi ditolak</span> (${why}).`;
+    else html += `Hasil: <span class="ok">${n} transaksi berturut-turut</span> hingga ${why}.<br>Kondisi Akhir: A(sugar ${A0.s} &rarr; <b>${A.s}</b>, spice ${A0.p} &rarr; <b>${A.p}</b>), B(sugar ${B0.s} &rarr; <b>${B.s}</b>, spice ${B0.p} &rarr; <b>${B.p}</b>). Welfare A: ${f(welfare(A0,A0.s,A0.p),2)} &rarr; <b>${f(welfare(A,A.s,A.p),2)}</b>, B: ${f(welfare(B0,B0.s,B0.p),2)} &rarr; <b>${f(welfare(B,B.s,B.p),2)}</b>.`;
+    out.innerHTML = html;
+  }
+  host.addEventListener("input", run);
+  run();
+})();
+
+/* ---------- results replay ---------- */
+function fillResults(){
+  if (!DATA) return;
+  const D = DATA, m = D.meta;
+  const nf = v => String(v).replace(".", ",");
+  if ($("#runFacts")) {
+    $("#runFacts").innerHTML = `<b>Metrik Terverifikasi Single Run (Seed ${m.seed}):</b><ul style="margin:.3rem 0 0;padding-left:1.2rem">
+      <li>Populasi: ${m.initial_traders} awal &rarr; <b>${m.final_traders} penyintas</b> di step ${m.steps} (stabil sejak step ${m.stable_from}).</li>
+      <li>Trade Volume: ${m.vol_step1} transaksi di step 1, rata-rata ${nf(m.vol_late_mean)} per step di fase akhir (step 800–999).</li>
+      <li>Harga Rata-rata (Geometric Mean): <b>${nf(m.price_mean)}</b> (simpangan baku awal ${nf(m.price_std_early)}, akhir ${nf(m.price_std_late)}).</li></ul>`;
+  }
+  const fr = $("#frameRange");
+  if (fr) {
+    fr.max = D.frames.length - 1;
+    fr.addEventListener("input", () => { state.frame = +fr.value; drawReplay(); drawChart(); });
+  }
+  if ($("#layerSeg")) {
+    $("#layerSeg").addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      state.layer = b.dataset.v;
+      $$("button", $("#layerSeg")).forEach(x => x.setAttribute("aria-pressed", x === b));
+      drawReplay();
+    });
+  }
+  if ($("#chartSeg")) {
+    $("#chartSeg").addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      state.chart = b.dataset.v;
+      $$("button", $("#chartSeg")).forEach(x => x.setAttribute("aria-pressed", x === b));
+      drawChart();
+    });
+  }
+}
+const state = { frame: 0, layer: "sugar", chart: "trader" };
+function drawReplay(){
+  if (!DATA) return;
+  const replayCanvas = $("#replayMap");
+  if (!replayCanvas) return;
+  const step = DATA.frames[state.frame].step;
+  drawLand(replayCanvas, state.layer, DATA.frames[state.frame].pos);
+  const s = DATA.series, i = Math.max(0, step - 1);
+  const statEl = $("#frameStat");
+  if (statEl) {
+    statEl.innerHTML = step === 0 ?
+      `<span>Step <b>0</b></span><span>Trader <b>${DATA.meta.initial_traders}</b></span><span class="hint">Inisialisasi acak</span>` :
+      `<span>Step <b>${step}</b></span><span>Trader <b>${s.trader[i]}</b></span><span>Volume <b>${s.volume[i]}</b></span><span>Price <b>${s.price[i] == null ? "n/a" : s.price[i]}</b></span>`;
+  }
+}
+function drawChart(){
+  if (!DATA) return;
+  const c = $("#chart");
+  if (!c) return;
+  const f = fitCanvas(c);
+  if (!f) return;
+  const { g, w, h } = f;
+  const S = DATA.series, kind = state.chart, n = S.trader.length;
+  const pad = { l: 44, r: 10, t: 10, b: 26 };
+  const W = w - pad.l - pad.r, H = h - pad.t - pad.b;
+  let ys, ymin = 0, ymax, color, label;
+  if (kind === "trader") { ys = S.trader; ymax = Math.max(...ys) + 5; color = "#0B6468"; label = "Jumlah Trader"; }
+  else if (kind === "volume") { ys = S.volume; ymax = Math.max(...ys.slice(5)) * 1.15; color = "#B3204D"; label = "Trade Volume"; }
+  else { ys = S.price; ymin = 0; ymax = Math.max(...ys.filter(v => v != null)) * 1.1; color = "#C98A00"; label = "Price"; }
+  g.clearRect(0, 0, w, h);
+  g.font = "12px Segoe UI, sans-serif";
+  g.fillStyle = "#4F5D68";
+  g.strokeStyle = "#D3DBE1";
+  g.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const v = ymin + (ymax - ymin) * k / 4, y = pad.t + H - H * k / 4;
+    g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke();
+    g.textAlign = "right"; g.fillText(kind === "price" ? v.toFixed(1) : Math.round(v), pad.l - 6, y + 4);
+  }
+  g.textAlign = "center";
+  [0, 250, 500, 750, 1000].forEach(s => { g.fillText(s, pad.l + W * s / n, h - 8); });
+  const X = i => pad.l + W * (i + 1) / n, Y = v => pad.t + H - H * (v - ymin) / (ymax - ymin);
+  if (kind === "price") {
+    g.strokeStyle = "#16222C"; g.setLineDash([4, 4]);
+    g.beginPath(); g.moveTo(pad.l, Y(1)); g.lineTo(w - pad.r, Y(1)); g.stroke(); g.setLineDash([]);
+    g.fillText("1.0", pad.l + 14, Y(1) - 4);
+    g.fillStyle = color;
+    ys.forEach((v, i) => { if (v != null) g.fillRect(X(i) - .8, Y(v) - .8, 1.8, 1.8); });
+  } else if (kind === "volume") {
+    g.strokeStyle = color; g.lineWidth = 1;
+    ys.forEach((v, i) => {
+      const x = X(i); g.beginPath(); g.moveTo(x, Y(0)); g.lineTo(x, Y(Math.min(v, ymax))); g.stroke();
+    });
+    if (S.volume[0] > ymax) {
+      g.fillStyle = "#4F5D68"; g.textAlign = "left";
+      g.fillText("step 1 = " + S.volume[0] + " (di luar skala)", pad.l + 8, pad.t + 12);
+    }
+  } else {
+    g.strokeStyle = color; g.lineWidth = 2;
+    g.beginPath();
+    ys.forEach((v, i) => { i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)); });
+    g.stroke();
+  }
+  const step = DATA.frames[state.frame].step;
+  if (step > 0) {
+    g.strokeStyle = "#16222C"; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(pad.l + W * step / n, pad.t); g.lineTo(pad.l + W * step / n, pad.t + H); g.stroke();
+  }
+  g.fillStyle = "#16222C"; g.textAlign = "left";
+  g.fillText(label + " per step", pad.l + 6, pad.t + 12);
+}
+
+/* ---------- scroll observer & progress ---------- */
+const slides = $$(".slide");
+slides.forEach((s, i) => {
+  if (!s.id) s.id = "section-" + String(i + 1).padStart(2, "0");
+  s.setAttribute("aria-label", (i + 1) + ". " + s.dataset.title);
+});
+function updateProgress(){
+  const max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+  const pct = Math.min(100, Math.max(0, window.scrollY / max * 100));
+  $("#pfill").style.width = pct + "%";
+  $("#pbar").setAttribute("aria-valuenow", Math.round(pct));
+}
+function onShowSlide(slide){
+  if (!DATA || !slide) return;
+  requestAnimationFrame(() => {
+    if (slide.querySelector("#titleMap")) drawLand($("#titleMap"), "both", null);
+    if (slide.querySelector("#replayMap")) { drawReplay(); drawChart(); }
+  });
+}
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) return;
+    entry.target.classList.add("is-visible");
+    onShowSlide(entry.target);
+  });
+}, { root: null, rootMargin: "-15% 0px -15% 0px", threshold: 0.05 });
+
+slides.forEach(s => observer.observe(s));
+window.addEventListener("scroll", updateProgress, { passive: true });
+window.addEventListener("resize", () => { updateProgress(); const cur = slides.find(s => s.classList.contains("is-visible")); if (cur) onShowSlide(cur); }, { passive: true });
+updateProgress();
+slides[0].classList.add("is-visible");
+onShowSlide(slides[0]);
+
+if (DATA) fillResults();
+</script>
+</body>
+</html>

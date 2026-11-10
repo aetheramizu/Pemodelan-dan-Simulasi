@@ -1,0 +1,10 @@
+# Dependencies required to run the SugarscapeG1mt final model (Session 20)
+# Note: The Complexity Explorer Mesa course was recorded against Mesa 1.1–1.2
+# (using mesa.space.MultiGrid, mesa.time.RandomActivationByType, and Agent(unique_id, model)).
+# Tested only on Mesa 1.2.1. Mesa 2.4.0 fails with KeyError in step()
+# (DataCollector keys records by model._steps, not schedule.steps); Mesa 3.0+ removed mesa.time.
+mesa>=1.2.1,<2.0.0
+numpy>=1.23.0
+pandas>=1.5.0
+matplotlib>=3.6.0
+networkx>=2.8.8
